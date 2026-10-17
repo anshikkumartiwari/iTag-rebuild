@@ -80,7 +80,8 @@
         <service
             android:name=".service.FloatingClickerService"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- Accessibility Service for Remote Auto-Clicker Gestures -->
         <service
