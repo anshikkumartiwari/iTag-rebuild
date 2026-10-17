@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.PhoneIphone
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -61,6 +62,13 @@ import androidx.compose.ui.unit.dp
 import com.ifind.app.data.AppTheme
 import com.ifind.app.data.PreferencesManager
 
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+
 @Composable
 fun SettingsScreen(
     preferencesManager: PreferencesManager
@@ -69,7 +77,8 @@ fun SettingsScreen(
     val currentTheme by preferencesManager.theme.collectAsState()
     val disconnectAlert by preferencesManager.disconnectAlertEnabled.collectAsState()
     val findMyPhone by preferencesManager.findMyPhoneEnabled.collectAsState()
-    val countdownSec by preferencesManager.cameraCountdownSeconds.collectAsState()
+
+    var showThemeMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -78,87 +87,93 @@ fun SettingsScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            text = "Preferences, Camera Shutter & Appearance",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Appearance / Theme Section
-        SettingsCard(title = "Theme & Appearance", icon = Icons.Rounded.LightMode) {
-            Text(
-                text = "Choose your interface theme",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ThemeChip(
-                    text = "System",
-                    icon = Icons.Rounded.BrightnessAuto,
-                    selected = currentTheme == AppTheme.FOLLOW_SYSTEM,
-                    onClick = { preferencesManager.setTheme(AppTheme.FOLLOW_SYSTEM) },
-                    modifier = Modifier.weight(1f)
+        // Top Header with Theme Dropdown Button on the right
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Settings",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
-                ThemeChip(
-                    text = "Light",
-                    icon = Icons.Rounded.LightMode,
-                    selected = currentTheme == AppTheme.LIGHT,
-                    onClick = { preferencesManager.setTheme(AppTheme.LIGHT) },
-                    modifier = Modifier.weight(1f)
-                )
-                ThemeChip(
-                    text = "Dark",
-                    icon = Icons.Rounded.DarkMode,
-                    selected = currentTheme == AppTheme.DARK,
-                    onClick = { preferencesManager.setTheme(AppTheme.DARK) },
-                    modifier = Modifier.weight(1f)
+                Text(
+                    text = "Preferences & App Permissions",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
+            // Top-right Theme Dropdown
+            Box {
+                OutlinedButton(
+                    onClick = { showThemeMenu = true },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                ) {
+                    Icon(
+                        imageVector = when (currentTheme) {
+                            AppTheme.DARK -> Icons.Rounded.DarkMode
+                            AppTheme.LIGHT -> Icons.Rounded.LightMode
+                            AppTheme.FOLLOW_SYSTEM -> Icons.Rounded.BrightnessAuto
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = when (currentTheme) {
+                            AppTheme.DARK -> "Dark"
+                            AppTheme.LIGHT -> "Light"
+                            AppTheme.FOLLOW_SYSTEM -> "System"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
 
-        // Remote Camera Settings
-        SettingsCard(title = "Remote Selfie Camera", icon = Icons.Rounded.CameraAlt) {
-            Text(
-                text = "Countdown timer when shutter is triggered",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(0 to "Instant", 3 to "3 Seconds", 5 to "5 Seconds").forEach { (sec, label) ->
-                    FilterChip(
-                        selected = countdownSec == sec,
-                        onClick = { preferencesManager.setCameraCountdown(sec) },
-                        label = { Text(label) },
-                        leadingIcon = if (sec > 0) {
-                            { Icon(imageVector = Icons.Rounded.Timer, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                        } else null,
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = Color.White
-                        )
+                DropdownMenu(
+                    expanded = showThemeMenu,
+                    onDismissRequest = { showThemeMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("System Theme") },
+                        leadingIcon = { Icon(Icons.Rounded.BrightnessAuto, contentDescription = null) },
+                        onClick = {
+                            preferencesManager.setTheme(AppTheme.FOLLOW_SYSTEM)
+                            showThemeMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Dark Mode") },
+                        leadingIcon = { Icon(Icons.Rounded.DarkMode, contentDescription = null) },
+                        onClick = {
+                            preferencesManager.setTheme(AppTheme.DARK)
+                            showThemeMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Light Mode") },
+                        leadingIcon = { Icon(Icons.Rounded.LightMode, contentDescription = null) },
+                        onClick = {
+                            preferencesManager.setTheme(AppTheme.LIGHT)
+                            showThemeMenu = false
+                        }
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Tracker Alerts Section
         SettingsCard(title = "Alerts & Find Phone", icon = Icons.AutoMirrored.Rounded.VolumeUp) {
@@ -335,34 +350,6 @@ fun SettingsCard(
             }
             Spacer(modifier = Modifier.height(16.dp))
             content()
-        }
-    }
-}
-
-@Composable
-fun ThemeChip(
-    text: String,
-    icon: ImageVector,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() },
-        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-        border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-    ) {
-        Row(
-            modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(text = text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
         }
     }
 }

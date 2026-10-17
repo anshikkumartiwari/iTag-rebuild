@@ -271,7 +271,7 @@ fun DeviceScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isAlarmActive) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
+                                imageVector = Icons.Rounded.NotificationsActive,
                                 contentDescription = null,
                                 tint = if (isAlarmActive) AccentCoral else MaterialTheme.colorScheme.primary
                             )
@@ -350,13 +350,13 @@ fun DeviceScreen(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(BrandCyan.copy(alpha = 0.15f)),
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.TouchApp,
                                 contentDescription = null,
-                                tint = BrandCyan,
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
@@ -391,7 +391,7 @@ fun DeviceScreen(
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
-                            checkedTrackColor = BrandCyan
+                            checkedTrackColor = MaterialTheme.colorScheme.primary
                         )
                     )
                 }
@@ -404,78 +404,78 @@ fun DeviceScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                // Only show permission alerts if they are NOT granted
+                if (!hasOverlayPermission || !isAccessibilityEnabled) {
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                // Permission checklist for Auto-Clicker
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Overlay Permission Chip
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                if (!hasOverlayPermission) {
-                                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
-                                    context.startActivity(intent)
-                                }
-                            },
-                        color = if (hasOverlayPermission) AccentEmerald.copy(alpha = 0.12f) else AccentCoral.copy(alpha = 0.12f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (hasOverlayPermission) AccentEmerald.copy(alpha = 0.4f) else AccentCoral.copy(alpha = 0.4f))
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = if (hasOverlayPermission) Icons.Rounded.CheckCircle else Icons.Rounded.Layers,
-                                contentDescription = null,
-                                tint = if (hasOverlayPermission) AccentEmerald else AccentCoral,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (hasOverlayPermission) "Overlay: Granted" else "Tap for Overlay",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (hasOverlayPermission) AccentEmerald else AccentCoral
-                            )
+                        if (!hasOverlayPermission) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                        context.startActivity(intent)
+                                    },
+                                color = AccentCoral.copy(alpha = 0.12f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentCoral.copy(alpha = 0.4f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Layers,
+                                        contentDescription = null,
+                                        tint = AccentCoral,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Grant Overlay Permission",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AccentCoral
+                                    )
+                                }
+                            }
                         }
-                    }
 
-                    // Accessibility Permission Chip
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                if (!isAccessibilityEnabled) {
-                                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                    context.startActivity(intent)
+                        if (!isAccessibilityEnabled) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                        context.startActivity(intent)
+                                    },
+                                color = AccentAmber.copy(alpha = 0.12f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentAmber.copy(alpha = 0.4f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Accessibility,
+                                        contentDescription = null,
+                                        tint = AccentAmber,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Enable Accessibility Service",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AccentAmber
+                                    )
                                 }
-                            },
-                        color = if (isAccessibilityEnabled) AccentEmerald.copy(alpha = 0.12f) else AccentAmber.copy(alpha = 0.12f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isAccessibilityEnabled) AccentEmerald.copy(alpha = 0.4f) else AccentAmber.copy(alpha = 0.4f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = if (isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Accessibility,
-                                contentDescription = null,
-                                tint = if (isAccessibilityEnabled) AccentEmerald else AccentAmber,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isAccessibilityEnabled) "Accessibility: ON" else "Tap for Accessibility",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isAccessibilityEnabled) AccentEmerald else AccentAmber
-                            )
+                            }
                         }
                     }
                 }

@@ -110,103 +110,6 @@ fun LocationScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Record Current Location (Always prominently visible at top)
-        Button(
-            onClick = {
-                locationTracker.recordCurrentLocation()
-                Toast.makeText(context, "Recording current GPS position...", Toast.LENGTH_SHORT).show()
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = Color.White
-            )
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.MyLocation,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Record Current Location", fontWeight = FontWeight.SemiBold)
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Actions Row: Export CSV, Clear > 1 Week, Clear All
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Export CSV
-            OutlinedButton(
-                onClick = {
-                    val csv = preferencesManager.exportLocationCsv()
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = ClipData.newPlainText("iFind Location CSV", csv)
-                    clipboard.setPrimaryClip(clip)
-
-                    // Open Share Sheet
-                    val sendIntent = Intent().apply {
-                        action = Intent.ACTION_SEND
-                        putExtra(Intent.EXTRA_TEXT, csv)
-                        putExtra(Intent.EXTRA_SUBJECT, "iFind Location History CSV")
-                        type = "text/csv"
-                    }
-                    val shareIntent = Intent.createChooser(sendIntent, "Export Location CSV")
-                    context.startActivity(shareIntent)
-
-                    Toast.makeText(context, "CSV copied to clipboard & sharing opened", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.FileDownload,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Export CSV", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            }
-
-            // Clear > 1 Week
-            OutlinedButton(
-                onClick = {
-                    preferencesManager.clearLocationsOlderThanOneWeek()
-                    Toast.makeText(context, "Cleared records older than 7 days", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.History,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Clear > 1 Wk", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            }
-
-            // Clear All
-            OutlinedButton(
-                onClick = { showClearAllDialog = true },
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.DeleteOutline,
-                    contentDescription = "Clear All",
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
         // Last Known Spot Hero Card
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -368,13 +271,110 @@ fun LocationScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "Tap 'Record Current Location' above or connect your tracker to save spots.",
+                                text = "Tap 'Record Current Location' below or connect your tracker to save spots.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Record Current Location (Below Last Known Position Card)
+        Button(
+            onClick = {
+                locationTracker.recordCurrentLocation()
+                Toast.makeText(context, "Recording current GPS position...", Toast.LENGTH_SHORT).show()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = Color.White
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.MyLocation,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Record Current Location", fontWeight = FontWeight.SemiBold)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Actions Row: Export CSV, Clear > 1 Week, Clear All
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Export CSV
+            OutlinedButton(
+                onClick = {
+                    val csv = preferencesManager.exportLocationCsv()
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("iFind Location CSV", csv)
+                    clipboard.setPrimaryClip(clip)
+
+                    // Open Share Sheet
+                    val sendIntent = Intent().apply {
+                        action = Intent.ACTION_SEND
+                        putExtra(Intent.EXTRA_TEXT, csv)
+                        putExtra(Intent.EXTRA_SUBJECT, "iFind Location History CSV")
+                        type = "text/csv"
+                    }
+                    val shareIntent = Intent.createChooser(sendIntent, "Export Location CSV")
+                    context.startActivity(shareIntent)
+
+                    Toast.makeText(context, "CSV copied to clipboard & sharing opened", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.FileDownload,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Export CSV", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+
+            // Clear > 1 Week
+            OutlinedButton(
+                onClick = {
+                    preferencesManager.clearLocationsOlderThanOneWeek()
+                    Toast.makeText(context, "Cleared records older than 7 days", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.History,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Clear > 1 Wk", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+
+            // Clear All
+            OutlinedButton(
+                onClick = { showClearAllDialog = true },
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.DeleteOutline,
+                    contentDescription = "Clear All",
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
 
