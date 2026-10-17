@@ -251,7 +251,12 @@ class FloatingClickerService : Service() {
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             setPadding(dp(6), dp(2), dp(6), dp(2))
-            setOnClickListener { settingsPanel.visibility = View.GONE }
+            setOnClickListener {
+                settingsPanel.visibility = View.GONE
+                try {
+                    windowManager?.updateViewLayout(rootLayout, params)
+                } catch (_: Exception) {}
+            }
         }
 
         panelTitleRow.addView(panelTitle)
@@ -451,16 +456,46 @@ class FloatingClickerService : Service() {
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, dp(2))
+            setPadding(0, dp(8), 0, dp(4))
             setOnClickListener {
                 prefs.resetFloaterSettings()
                 updateModeButtons("click")
                 distanceDisplay.text = "550 dp"
                 doubleTapSwitch.isChecked = false
-                Toast.makeText(this@FloatingClickerService, "Reset clicker to defaults (Tap, 550dp)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@FloatingClickerService, "Reset clicker to defaults", Toast.LENGTH_SHORT).show()
+                try {
+                    windowManager?.updateViewLayout(rootLayout, params)
+                } catch (_: Exception) {}
             }
         }
         settingsPanel.addView(resetBtn)
+
+        // Hide Clicker Button inside settings popup
+        val hideBtn = TextView(this).apply {
+            text = "Hide Button"
+            setTextColor(0xFFFF453A.toInt())
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            val btnBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(0x25FF453A.toInt())
+                setStroke(dp(1), 0x55FF453A.toInt())
+            }
+            background = btnBg
+            setPadding(0, dp(8), 0, dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(8)
+            }
+            setOnClickListener {
+                stopSelf()
+            }
+        }
+        settingsPanel.addView(hideBtn)
 
         // ================= STYLIZED CONTROL PILL =================
         val controlPill = LinearLayout(this).apply {
@@ -472,7 +507,7 @@ class FloatingClickerService : Service() {
             ).apply {
                 topMargin = dp(4)
             }
-            setPadding(dp(10), 0, dp(10), 0)
+            setPadding(dp(12), 0, dp(10), 0)
             val pillBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(17).toFloat()
@@ -482,19 +517,7 @@ class FloatingClickerService : Service() {
             background = pillBg
         }
 
-        // Active Status Dot
-        val statusDot = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(7), dp(7)).apply {
-                marginEnd = dp(6)
-            }
-            val drawable = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(0xFF34C759.toInt())
-            }
-            background = drawable
-        }
-
-        // Stylized "iTag Click" Label
+        // Stylized "iTag Click" Label (no green dot, no red cross)
         val coordLabel = TextView(this).apply {
             text = "iTag Click"
             setTextColor(Color.WHITE)
@@ -508,32 +531,21 @@ class FloatingClickerService : Service() {
         val settingsGearBtn = TextView(this).apply {
             text = "  ⚙"
             setTextColor(0xFF0A84FF.toInt())
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setPadding(dp(4), 0, dp(4), 0)
-            setOnClickListener {
-                settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            }
-        }
-
-        // Close "✕" Button
-        val closeBtn = TextView(this).apply {
-            text = " ✕"
-            setTextColor(0xFFFF453A.toInt())
-            textSize = 13f
+            textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setPadding(dp(4), 0, dp(2), 0)
             setOnClickListener {
-                stopSelf()
+                val isCurrentlyVisible = settingsPanel.visibility == View.VISIBLE
+                settingsPanel.visibility = if (isCurrentlyVisible) View.GONE else View.VISIBLE
+                try {
+                    windowManager?.updateViewLayout(rootLayout, params)
+                } catch (_: Exception) {}
             }
         }
 
-        controlPill.addView(statusDot)
         controlPill.addView(coordLabel)
         controlPill.addView(settingsGearBtn)
-        controlPill.addView(closeBtn)
 
         val spacer = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(1, dp(4))
