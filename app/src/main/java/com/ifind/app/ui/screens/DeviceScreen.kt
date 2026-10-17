@@ -308,11 +308,11 @@ fun DeviceScreen(
                         enabled = isReady && !isAlarmActive,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandCyan, contentColor = Color.Black)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White)
                     ) {
                         Icon(imageVector = Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "Start Alarm", fontWeight = FontWeight.Bold)
+                        Text(text = "Start Alarm", fontWeight = FontWeight.SemiBold)
                     }
 
                     OutlinedButton(
@@ -320,9 +320,9 @@ fun DeviceScreen(
                         enabled = isReady,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentCoral)
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                     ) {
-                        Icon(imageVector = Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(imageVector = Icons.AutoMirrored.Rounded.VolumeOff, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(text = "Stop Alarm", fontWeight = FontWeight.SemiBold)
                     }
@@ -337,7 +337,7 @@ fun DeviceScreen(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, BrandCyan.copy(alpha = 0.5f))
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Row(
@@ -507,15 +507,13 @@ fun DeviceScreen(
                         modifier = Modifier
                             .size(46.dp)
                             .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(listOf(BrandCyan, MaterialTheme.colorScheme.primary))
-                            ),
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.CameraAlt,
                             contentDescription = null,
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                     Spacer(modifier = Modifier.width(16.dp))
@@ -753,18 +751,6 @@ fun DeviceHeroCard(
     val isConnected = connectionState.isConnected
     val isReady = connectionState.isReady
 
-    // Infinite breathing animation for active connection
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -777,54 +763,26 @@ fun DeviceHeroCard(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Animated Beacon Indicator
+            // Hardware Tracker Token
             Box(
                 modifier = Modifier
-                    .size(100.dp)
+                    .size(76.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (isReady) BrandCyan.copy(alpha = 0.12f)
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    ),
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                if (isReady) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .scale(pulseScale)
-                            .clip(CircleShape)
-                            .background(BrandCyan.copy(alpha = 0.2f))
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                isReady -> BrandCyan
-                                isConnected -> MaterialTheme.colorScheme.primary
-                                connectionState is ConnectionState.Connecting -> AccentAmber
-                                connectionState is ConnectionState.Error -> AccentCoral
-                                else -> MaterialTheme.colorScheme.outline
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = when {
-                            isConnected -> Icons.Rounded.BluetoothConnected
-                            connectionState is ConnectionState.Connecting -> Icons.Rounded.Bluetooth
-                            connectionState is ConnectionState.Error -> Icons.Rounded.BluetoothDisabled
-                            else -> Icons.Rounded.Bluetooth
-                        },
-                        contentDescription = null,
-                        tint = if (isReady) Color.Black else Color.White,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
+                Icon(
+                    imageVector = when {
+                        isConnected -> Icons.Rounded.BluetoothConnected
+                        connectionState is ConnectionState.Connecting -> Icons.Rounded.Bluetooth
+                        connectionState is ConnectionState.Error -> Icons.Rounded.BluetoothDisabled
+                        else -> Icons.Rounded.Bluetooth
+                    },
+                    contentDescription = null,
+                    tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(32.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -868,21 +826,29 @@ fun DeviceHeroCard(
 
             // Connect / Disconnect Buttons
             if (isConnected) {
-                OutlinedButton(
+                Button(
                     onClick = onDisconnectClicked,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentCoral),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier.fillMaxWidth(0.85f)
                 ) {
-                    Icon(imageVector = Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Disconnect Tracker")
+                    Text(
+                        text = "Disconnect",
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelLarge
+                    )
                 }
             } else {
                 Button(
                     onClick = onConnectClicked,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier.fillMaxWidth(0.85f)
                 ) {
                     Icon(imageVector = Icons.Rounded.Bluetooth, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -896,39 +862,35 @@ fun DeviceHeroCard(
 
 @Composable
 fun ConnectionStatusBadge(connectionState: ConnectionState) {
-    val (color, text) = when (connectionState) {
-        ConnectionState.Ready -> Pair(AccentEmerald, "CONNECTED & READY")
-        ConnectionState.Connected -> Pair(AccentEmerald, "CONNECTED")
-        ConnectionState.DiscoveringServices -> Pair(AccentAmber, "CONFIGURING SERVICES...")
-        ConnectionState.Connecting -> Pair(AccentAmber, "CONNECTING...")
-        ConnectionState.Disconnecting -> Pair(AccentCoral, "DISCONNECTING...")
-        ConnectionState.Disconnected -> Pair(MaterialTheme.colorScheme.onSurfaceVariant, "DISCONNECTED")
-        is ConnectionState.Error -> Pair(AccentCoral, connectionState.message.take(30).uppercase())
+    val (dotColor, text) = when (connectionState) {
+        ConnectionState.Ready, ConnectionState.Connected -> Pair(com.ifind.app.ui.theme.AccentGreen, "Connected")
+        ConnectionState.Connecting, ConnectionState.DiscoveringServices -> Pair(com.ifind.app.ui.theme.AccentAmber, "Connecting...")
+        ConnectionState.Disconnecting -> Pair(MaterialTheme.colorScheme.onSurfaceVariant, "Disconnecting...")
+        ConnectionState.Disconnected -> Pair(MaterialTheme.colorScheme.onSurfaceVariant, "Not connected")
+        is ConnectionState.Error -> Pair(com.ifind.app.ui.theme.AccentRed, "Connection error")
     }
 
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = color.copy(alpha = 0.15f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.4f))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(color)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelSmall,
-                color = color,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(dotColor)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 

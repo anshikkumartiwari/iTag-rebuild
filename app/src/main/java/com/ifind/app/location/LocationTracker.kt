@@ -24,7 +24,7 @@ class LocationTracker(
                 .addOnSuccessListener { location ->
                     if (location != null) {
                         Log.i(TAG, "Recorded location: ${location.latitude}, ${location.longitude} (accuracy: ${location.accuracy}m)")
-                        preferencesManager.saveLastLocation(
+                        preferencesManager.addLocationRecord(
                             lat = location.latitude,
                             lng = location.longitude,
                             accuracy = location.accuracy,
@@ -34,7 +34,7 @@ class LocationTracker(
                         // Fall back to last known location
                         fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
                             if (lastLoc != null) {
-                                preferencesManager.saveLastLocation(
+                                preferencesManager.addLocationRecord(
                                     lat = lastLoc.latitude,
                                     lng = lastLoc.longitude,
                                     accuracy = lastLoc.accuracy,

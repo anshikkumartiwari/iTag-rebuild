@@ -101,6 +101,69 @@ class PreferencesManager(context: Context) {
         _lastLocationTimestamp.value = timestamp
     }
 
+    // Location History list
+    private val _locationHistory = MutableStateFlow(loadLocationHistory())
+    val locationHistory: StateFlow<List<com.ifind.app.location.model.LocationEntry>> = _locationHistory.asStateFlow()
+
+    private fun loadLocationHistory(): List<com.ifind.app.location.model.LocationEntry> {
+        val rawJson = prefs.getString(KEY_LOCATION_HISTORY, null) ?: return emptyList()
+        val list = mutableListOf<com.ifind.app.location.model.LocationEntry>()
+        try {
+            val array = org.json.JSONArray(rawJson)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(com.ifind.app.location.model.LocationEntry.fromJson(obj))
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    private fun persistLocationHistory(list: List<com.ifind.app.location.model.LocationEntry>) {
+        val array = org.json.JSONArray()
+        list.forEach { array.put(it.toJson()) }
+        prefs.edit().putString(KEY_LOCATION_HISTORY, array.toString()).apply()
+        _locationHistory.value = list
+    }
+
+    fun addLocationRecord(lat: Double, lng: Double, accuracy: Float, timestamp: Long = System.currentTimeMillis(), note: String = "Tracker Spot") {
+        saveLastLocation(lat, lng, accuracy, timestamp)
+
+        val newEntry = com.ifind.app.location.model.LocationEntry(
+            id = System.currentTimeMillis(),
+            timestamp = timestamp,
+            latitude = lat,
+            longitude = lng,
+            accuracy = accuracy,
+            note = note
+        )
+        val current = _locationHistory.value.toMutableList()
+        current.add(0, newEntry)
+        // Keep up to 200 recent records
+        if (current.size > 200) {
+            current.removeAt(current.lastIndex)
+        }
+        persistLocationHistory(current)
+    }
+
+    fun clearAllLocations() {
+        persistLocationHistory(emptyList())
+    }
+
+    fun clearLocationsOlderThanOneWeek() {
+        val oneWeekAgo = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000L)
+        val filtered = _locationHistory.value.filter { it.timestamp >= oneWeekAgo }
+        persistLocationHistory(filtered)
+    }
+
+    fun exportLocationCsv(): String {
+        val sb = StringBuilder()
+        sb.appendLine(com.ifind.app.location.model.LocationEntry.CSV_HEADER)
+        _locationHistory.value.forEach { entry ->
+            sb.appendLine(entry.toCsvRow())
+        }
+        return sb.toString()
+    }
+
     companion object {
         private const val KEY_THEME = "app_theme"
         private const val KEY_FRIENDLY_NAME = "device_friendly_name"
@@ -112,5 +175,6 @@ class PreferencesManager(context: Context) {
         private const val KEY_LAST_LNG = "last_longitude"
         private const val KEY_LAST_LOC_TIME = "last_location_time"
         private const val KEY_LAST_LOC_ACC = "last_location_acc"
+        private const val KEY_LOCATION_HISTORY = "location_history_json"
     }
 }

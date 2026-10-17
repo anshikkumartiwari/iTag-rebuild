@@ -88,6 +88,8 @@ class FloatingClickerService : Service() {
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(12), dp(12), dp(12), dp(24))
+            clipToPadding = false
         }
 
         // Target Reticle (Outer Ring + Inner Target Pin)
@@ -140,66 +142,71 @@ class FloatingClickerService : Service() {
         targetFrame.addView(vLine)
         targetFrame.addView(centerDot)
 
-        // Control Pill (Coordinates + Test Click + Close)
-        val controlPill = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            val pillBg = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                cornerRadius = dp(16).toFloat()
-                setColor(0xCC090D16.toInt())
-                setStroke(dp(1), 0x6600D2FF.toInt())
-            }
-            background = pillBg
-        }
-
-        val coordLabel = TextView(this).apply {
-            text = "iTAG Target"
-            setTextColor(0xFF00D2FF.toInt())
-            textSize = 10f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, dp(8), 0)
-        }
-
-        // Test Click Button
-        val testClickBtn = TextView(this).apply {
-            text = "TAP"
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 10f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setPadding(dp(6), dp(2), dp(6), dp(2))
-            val btnBg = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                cornerRadius = dp(8).toFloat()
-                setColor(0xFF2563EB.toInt())
-            }
-            background = btnBg
-            setOnClickListener {
-                performClickAtTarget(targetFrame)
-            }
-        }
-
-        // Close Button
+        // Close Button (Hidden by default, shown when clicking label)
         val closeBtn = TextView(this).apply {
-            text = "✕"
-            setTextColor(0xFFEF4444.toInt())
-            textSize = 12f
-            setPadding(dp(8), 0, 0, 0)
+            text = "  ✕"
+            setTextColor(0xFFFF453A.toInt())
+            textSize = 14f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(4), 0, dp(4), 0)
+            visibility = View.GONE
             setOnClickListener {
                 stopSelf()
             }
         }
 
+        // Control Pill (Label + optional Close cross)
+        val controlPill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(34)
+            ).apply {
+                topMargin = dp(4)
+                bottomMargin = dp(16)
+            }
+            setPadding(dp(12), dp(2), dp(12), dp(2))
+            val pillBg = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = dp(17).toFloat()
+                setColor(0xEE121212.toInt())
+                setStroke(dp(1), 0x88FFFFFF.toInt())
+            }
+            background = pillBg
+            isClickable = true
+        }
+
+        val coordLabel = TextView(this).apply {
+            text = "iTag Click"
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 12f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            setPadding(dp(2), 0, dp(2), 0)
+        }
+
+        val toggleClose = View.OnClickListener {
+            closeBtn.visibility = if (closeBtn.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        coordLabel.setOnClickListener(toggleClose)
+        controlPill.setOnClickListener(toggleClose)
+
         controlPill.addView(coordLabel)
-        controlPill.addView(testClickBtn)
         controlPill.addView(closeBtn)
 
+        val spacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(1, dp(4))
+        }
+
         rootLayout.addView(targetFrame)
+        rootLayout.addView(spacer)
         rootLayout.addView(controlPill)
 
-        // Touch listener for smooth dragging anywhere on the screen
-        rootLayout.setOnTouchListener { _, event ->
+        // Drag listener on the target reticle so dragging doesn't interfere with label/cross clicks
+        targetFrame.setOnTouchListener { _, event ->
             val p = params ?: return@setOnTouchListener false
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -252,10 +259,9 @@ class FloatingClickerService : Service() {
     private fun performClickAtTarget(view: View) {
         val p = params ?: return
         val density = resources.displayMetrics.density
-        val targetRadius = (32 * density) // 64dp diameter / 2
-
-        val targetScreenX = p.x + targetRadius
-        val targetScreenY = p.y + targetRadius
+        // Exact center of target frame: 12dp root padding + 32dp half-width = 44dp
+        val targetScreenX = p.x + (44 * density)
+        val targetScreenY = p.y + (44 * density)
 
         // Visual click feedback: scale animation
         view.animate()

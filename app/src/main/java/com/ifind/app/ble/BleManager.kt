@@ -477,56 +477,45 @@ class BleManager(private val context: Context) {
     }
 
     /**
-     * Start Alarm: Multi-vector command targeting Immediate Alert (0x02, 0x01 with response & no-response)
-     * as well as vendor Characteristic FFE2.
+     * Start Alarm: Transmits Immediate Alert 0x01 (Mild, Response) verified on physical hardware.
      */
     @SuppressLint("MissingPermission")
     fun startAlarm() {
         val gatt = bluetoothGatt ?: return
         var sent = false
 
-        // 1. Immediate Alert Service (0x1802 -> 0x2A06)
+        // Primary verified command: Immediate Alert Service (0x1802 -> 0x2A06) with 0x01 (Mild, Response)
         val immService = gatt.getService(BleConstants.IMMEDIATE_ALERT_SERVICE_UUID)
         val immChar = immService?.getCharacteristic(BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID)
         if (immChar != null) {
-            // Write High Alert (0x02) with DEFAULT (write with response)
             enqueueOp(
                 GattOp.WriteChar(
                     characteristic = immChar,
-                    value = byteArrayOf(BleConstants.ALERT_LEVEL_HIGH),
+                    value = byteArrayOf(BleConstants.ALERT_LEVEL_MILD),
                     writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                )
-            )
-            // Also enqueue with NO_RESPONSE for chips requiring unacknowledged packets
-            enqueueOp(
-                GattOp.WriteChar(
-                    characteristic = immChar,
-                    value = byteArrayOf(BleConstants.ALERT_LEVEL_HIGH),
-                    writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                 )
             )
             sent = true
         }
 
-        // 2. Custom Characteristic FFE2 (used in Telink / Lenze chips for buzzer)
-        val ffe0Service = gatt.getService(BleConstants.CUSTOM_SERVICE_FFE0_UUID)
-        val ffe2Char = ffe0Service?.getCharacteristic(BleConstants.WRITE_CHAR_FFE2_UUID)
-        if (ffe2Char != null) {
+        // Secondary fallback for Link Loss characteristic
+        val linkService = gatt.getService(BleConstants.LINK_LOSS_SERVICE_UUID)
+        val linkChar = linkService?.getCharacteristic(BleConstants.LINK_LOSS_ALERT_LEVEL_CHAR_UUID)
+        if (linkChar != null) {
             enqueueOp(
                 GattOp.WriteChar(
-                    characteristic = ffe2Char,
-                    value = byteArrayOf(0x01),
+                    characteristic = linkChar,
+                    value = byteArrayOf(BleConstants.ALERT_LEVEL_MILD),
                     writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                 )
             )
-            sent = true
         }
 
         if (sent) {
             _isAlarmActive.value = true
-            _statusMessage.value = "Alarm command transmitted (0x1802 & FFE2)"
+            _statusMessage.value = "Alarm active (Immediate Alert 0x01)"
         } else {
-            _statusMessage.value = "Alarm characteristics not found on tracker"
+            _statusMessage.value = "Immediate Alert Service not found on tracker"
         }
     }
 

@@ -9,11 +9,11 @@ import androidx.compose.ui.graphics.Color
 import com.ifind.app.data.AppTheme
 
 private val DarkColorScheme = darkColorScheme(
-    primary = BrandCyan,
-    onPrimary = Color.Black,
-    secondary = BrandBlue,
-    onSecondary = Color.White,
-    tertiary = AccentEmerald,
+    primary = AccentBlue,
+    onPrimary = Color.White,
+    secondary = Color.White,
+    onSecondary = Color.Black,
+    tertiary = AccentGreen,
     background = DarkBg,
     onBackground = DarkTextPrimary,
     surface = DarkSurface,
@@ -21,15 +21,15 @@ private val DarkColorScheme = darkColorScheme(
     surfaceVariant = DarkSurfaceElevated,
     onSurfaceVariant = DarkTextSecondary,
     outline = DarkBorder,
-    error = AccentCoral
+    error = AccentRed
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = BrandBlue,
+    primary = AccentBlue,
     onPrimary = Color.White,
-    secondary = BrandCyan,
-    onSecondary = Color.Black,
-    tertiary = AccentEmerald,
+    secondary = Color.Black,
+    onSecondary = Color.White,
+    tertiary = AccentGreen,
     background = LightBg,
     onBackground = LightTextPrimary,
     surface = LightSurface,
@@ -37,7 +37,7 @@ private val LightColorScheme = lightColorScheme(
     surfaceVariant = LightSurfaceElevated,
     onSurfaceVariant = LightTextSecondary,
     outline = LightBorder,
-    error = AccentCoral
+    error = AccentRed
 )
 
 @Composable
