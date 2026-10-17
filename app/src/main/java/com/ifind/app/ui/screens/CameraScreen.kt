@@ -101,14 +101,77 @@ import com.ifind.app.ui.theme.AccentAmber
 import com.ifind.app.ui.theme.AccentCoral
 import com.ifind.app.ui.theme.AccentEmerald
 import com.ifind.app.ui.theme.BrandCyan
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
+import android.graphics.Paint
+import androidx.camera.core.ImageProxy
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "CameraScreen"
+
+private fun applyWarmthToBitmap(src: Bitmap, warmthPercent: Int): Bitmap {
+    if (warmthPercent == 0) return src
+    val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(result)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    val w = (warmthPercent / 100f).coerceIn(-0.4f, 0.5f)
+    val rScale = 1.0f + (w * 0.16f)
+    val gScale = 1.0f + (w * 0.04f)
+    val bScale = 1.0f - (w * 0.16f)
+
+    val colorMatrix = ColorMatrix(
+        floatArrayOf(
+            rScale, 0f, 0f, 0f, 0f,
+            0f, gScale, 0f, 0f, 0f,
+            0f, 0f, bScale, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+        )
+    )
+    paint.colorFilter = ColorMatrixColorFilter(colorMatrix)
+    canvas.drawBitmap(src, 0f, 0f, paint)
+    return result
+}
+
+private fun saveBitmapToMediaStore(context: Context, bitmap: Bitmap): Uri? {
+    val name = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(System.currentTimeMillis())
+    val contentValues = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "iFind_$name.jpg")
+        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+        put(MediaStore.Images.Media.ORIENTATION, 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/iFind")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+    }
+
+    val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues) ?: return null
+    return try {
+        context.contentResolver.openOutputStream(uri)?.use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            contentValues.clear()
+            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+            context.contentResolver.update(uri, contentValues, null, null)
+        }
+        uri
+    } catch (e: Exception) {
+        Log.e(TAG, "Error saving bitmap to MediaStore: ${e.message}", e)
+        null
+    }
+}
 
 @Composable
 fun CameraScreen(
@@ -125,7 +188,9 @@ fun CameraScreen(
 
     // 1. Open app in selfie (front camera) by default
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_FRONT) }
-    var mirrorSelfie by remember { mutableStateOf(false) } // Default without mirroring as requested
+    var mirrorSelfie by remember { mutableStateOf(true) } // Mirror on for selfie by default
+    var warmthPercent by remember { mutableIntStateOf(10) } // 10% warmth by default in selfie
+    var showWarmthSlider by remember { mutableStateOf(false) }
     var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_OFF) } // Default flash off
     var countdownRemaining by remember { mutableIntStateOf(0) }
     var isCapturing by remember { mutableStateOf(false) }
@@ -170,23 +235,33 @@ fun CameraScreen(
                     val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                     val id = cursor.getLong(idColumn)
                     val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                    val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        try {
-                            context.contentResolver.loadThumbnail(contentUri, Size(120, 120), null)
-                        } catch (_: Exception) { null }
-                    } else {
-                        @Suppress("DEPRECATION")
-                        MediaStore.Images.Thumbnails.getThumbnail(
-                            context.contentResolver, id,
-                            MediaStore.Images.Thumbnails.MINI_KIND, null
-                        )
+                    val bitmap = try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            val source = android.graphics.ImageDecoder.createSource(context.contentResolver, contentUri)
+                            android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                                decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                                val maxDim = 1920
+                                if (info.size.width > maxDim || info.size.height > maxDim) {
+                                    val scale = Math.max(info.size.width, info.size.height).toFloat() / maxDim
+                                    decoder.setTargetSize((info.size.width / scale).toInt(), (info.size.height / scale).toInt())
+                                }
+                            }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            MediaStore.Images.Media.getBitmap(context.contentResolver, contentUri)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to decode full bitmap: ${e.message}")
+                        null
                     }
                     latestPhotoUri = contentUri
-                    latestPhotoBitmap = bitmap
+                    if (bitmap != null) {
+                        latestPhotoBitmap = bitmap
+                    }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading thumbnail: ${e.message}")
+            Log.e(TAG, "Error loading latest photo: ${e.message}")
         }
     }
 
@@ -194,30 +269,10 @@ fun CameraScreen(
         loadLatestPhoto()
     }
 
-    // Shutter Trigger Execution
+    // Shutter Trigger Execution with physical upright & mirror transform + warmth grading
     fun takePhoto() {
         val capture = imageCapture ?: return
         if (isCapturing) return
-
-        val name = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US).format(System.currentTimeMillis())
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "iFind_$name.jpg")
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/iFind")
-            }
-        }
-
-        // Without mirroring in selfie as requested (or follow mirror toggle)
-        val metadata = ImageCapture.Metadata().apply {
-            isReversedHorizontal = mirrorSelfie
-        }
-
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(
-            context.contentResolver,
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            contentValues
-        ).setMetadata(metadata).build()
 
         isCapturing = true
 
@@ -229,16 +284,57 @@ fun CameraScreen(
         }
 
         capture.takePicture(
-            outputOptions,
             ContextCompat.getMainExecutor(context),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    isCapturing = false
-                    outputFileResults.savedUri?.let { uri ->
-                        latestPhotoUri = uri
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                    coroutineScope.launch(Dispatchers.IO) {
+                        try {
+                            val rawBitmap = imageProxy.toBitmap()
+                            val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+
+                            // 1. Physically transform pixels to be upright and mirrored if requested
+                            val matrix = Matrix()
+                            if (rotationDegrees != 0) {
+                                matrix.postRotate(rotationDegrees.toFloat())
+                            }
+                            if (lensFacing == CameraSelector.LENS_FACING_FRONT && mirrorSelfie) {
+                                matrix.postScale(-1f, 1f)
+                            }
+
+                            val orientedBitmap = Bitmap.createBitmap(
+                                rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true
+                            )
+
+                            // 2. Apply warmth grading if configured
+                            val processedBitmap = if (warmthPercent != 0) {
+                                applyWarmthToBitmap(orientedBitmap, warmthPercent)
+                            } else {
+                                orientedBitmap
+                            }
+
+                            // 3. Save directly to MediaStore
+                            val savedUri = saveBitmapToMediaStore(context, processedBitmap)
+
+                            withContext(Dispatchers.Main) {
+                                isCapturing = false
+                                if (savedUri != null) {
+                                    latestPhotoUri = savedUri
+                                    latestPhotoBitmap = processedBitmap
+                                    Toast.makeText(context, "Saved selfie to Gallery!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Error processing captured photo: ${e.message}", e)
+                            withContext(Dispatchers.Main) {
+                                isCapturing = false
+                                Toast.makeText(context, "Photo processing error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        } finally {
+                            imageProxy.close()
+                        }
                     }
-                    loadLatestPhoto()
-                    Toast.makeText(context, "Saved selfie to Gallery!", Toast.LENGTH_SHORT).show()
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -388,6 +484,17 @@ fun CameraScreen(
                 }
             )
 
+            // Real-time Warmth Tint Overlay on live viewfinder
+            if (warmthPercent != 0) {
+                val tintColor = if (warmthPercent > 0) Color(0xFFFFA000) else Color(0xFF2196F3)
+                val tintAlpha = (Math.abs(warmthPercent) / 100f * 0.16f).coerceIn(0f, 0.22f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(tintColor.copy(alpha = tintAlpha))
+                )
+            }
+
             // 2. Google Pixel Style Tap-to-Focus Ring and Exposure Slider
             if (showFocusRing && focusPoint != null) {
                 val pt = focusPoint!!
@@ -496,134 +603,202 @@ fun CameraScreen(
         }
 
         // 5. Minimal Google Pixel Style Top Control Bar
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 38.dp)
-                .align(Alignment.TopCenter),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .align(Alignment.TopCenter)
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.45f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White
-                )
-            }
-
-            // Tracker Status Pill
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = Color.Black.copy(alpha = 0.55f),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isConnected) AccentEmerald.copy(alpha = 0.8f) else AccentCoral.copy(alpha = 0.8f)
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.45f))
                 ) {
                     Icon(
-                        imageVector = if (isConnected) Icons.Rounded.BluetoothConnected else Icons.Rounded.BluetoothDisabled,
-                        contentDescription = null,
-                        tint = if (isConnected) AccentEmerald else AccentCoral,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (isConnected) "iTAG SHUTTER READY" else "iTAG DISCONNECTED",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
                     )
                 }
-            }
 
-            // Controls Group: Mirror, Flash, Timer
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Mirror Selfie Toggle (only on front camera)
-                if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
-                    IconButton(
-                        onClick = {
-                            mirrorSelfie = !mirrorSelfie
-                            Toast.makeText(
-                                context,
-                                if (mirrorSelfie) "Selfie Mirror: ON" else "Selfie Mirror: OFF (Natural)",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(if (mirrorSelfie) BrandCyan.copy(alpha = 0.4f) else Color.Black.copy(alpha = 0.45f))
+                // Tracker Status Pill
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color.Black.copy(alpha = 0.55f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isConnected) AccentEmerald.copy(alpha = 0.8f) else AccentCoral.copy(alpha = 0.8f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Flip,
-                            contentDescription = "Mirror Selfie",
-                            tint = if (mirrorSelfie) BrandCyan else Color.White,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = if (isConnected) Icons.Rounded.BluetoothConnected else Icons.Rounded.BluetoothDisabled,
+                            contentDescription = null,
+                            tint = if (isConnected) AccentEmerald else AccentCoral,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isConnected) "iTAG SHUTTER READY" else "iTAG DISCONNECTED",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
                     }
                 }
 
-                // Flash Toggle
-                IconButton(
-                    onClick = {
-                        flashMode = when (flashMode) {
-                            ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
-                            ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
-                            else -> ImageCapture.FLASH_MODE_OFF
-                        }
-                    },
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.45f))
-                ) {
-                    Icon(
-                        imageVector = when (flashMode) {
-                            ImageCapture.FLASH_MODE_ON -> Icons.Rounded.FlashOn
-                            ImageCapture.FLASH_MODE_AUTO -> Icons.Rounded.FlashAuto
-                            else -> Icons.Rounded.FlashOff
+                // Controls Group: Warmth, Mirror, Flash, Timer
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Warmth Adjustment Button
+                    IconButton(
+                        onClick = {
+                            showWarmthSlider = !showWarmthSlider
                         },
-                        contentDescription = "Flash",
-                        tint = if (flashMode != ImageCapture.FLASH_MODE_OFF) AccentAmber else Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (showWarmthSlider || warmthPercent != 0) AccentAmber.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.45f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.WbSunny,
+                            contentDescription = "Warmth",
+                            tint = if (warmthPercent != 0) AccentAmber else Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
 
-                // Countdown Timer Toggle
-                IconButton(
-                    onClick = {
-                        val nextSec = when (countdownSetting) {
-                            0 -> 3
-                            3 -> 5
-                            else -> 0
+                    // Mirror Selfie Toggle (only on front camera)
+                    if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                        IconButton(
+                            onClick = {
+                                mirrorSelfie = !mirrorSelfie
+                                Toast.makeText(
+                                    context,
+                                    if (mirrorSelfie) "Selfie Mirror: ON" else "Selfie Mirror: OFF (Natural)",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (mirrorSelfie) BrandCyan.copy(alpha = 0.4f) else Color.Black.copy(alpha = 0.45f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Flip,
+                                contentDescription = "Mirror Selfie",
+                                tint = if (mirrorSelfie) BrandCyan else Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
-                        preferencesManager.setCameraCountdown(nextSec)
-                    },
+                    }
+
+                    // Flash Toggle
+                    IconButton(
+                        onClick = {
+                            flashMode = when (flashMode) {
+                                ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
+                                ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
+                                else -> ImageCapture.FLASH_MODE_OFF
+                            }
+                        },
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.45f))
+                    ) {
+                        Icon(
+                            imageVector = when (flashMode) {
+                                ImageCapture.FLASH_MODE_ON -> Icons.Rounded.FlashOn
+                                ImageCapture.FLASH_MODE_AUTO -> Icons.Rounded.FlashAuto
+                                else -> Icons.Rounded.FlashOff
+                            },
+                            contentDescription = "Flash",
+                            tint = if (flashMode != ImageCapture.FLASH_MODE_OFF) AccentAmber else Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Countdown Timer Toggle
+                    IconButton(
+                        onClick = {
+                            val nextSec = when (countdownSetting) {
+                                0 -> 3
+                                3 -> 5
+                                else -> 0
+                            }
+                            preferencesManager.setCameraCountdown(nextSec)
+                        },
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.45f))
+                    ) {
+                        if (countdownSetting > 0) {
+                            Text(
+                                text = "${countdownSetting}s",
+                                color = BrandCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Timer,
+                                contentDescription = "Timer",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Warmth Slider Bar Popup
+            AnimatedVisibility(
+                visible = showWarmthSlider,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(150))
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.Black.copy(alpha = 0.75f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
                     modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.45f))
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
                 ) {
-                    if (countdownSetting > 0) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Text(
-                            text = "${countdownSetting}s",
+                            "Cool",
                             color = BrandCyan,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.Timer,
-                            contentDescription = "Timer",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                        Slider(
+                            value = warmthPercent.toFloat(),
+                            onValueChange = { warmthPercent = it.toInt() },
+                            valueRange = -30f..50f,
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(
+                                thumbColor = AccentAmber,
+                                activeTrackColor = AccentAmber,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        )
+                        val warmLabel = if (warmthPercent > 0) "+$warmthPercent%" else "$warmthPercent%"
+                        Text(
+                            "Warm ($warmLabel)",
+                            color = AccentAmber,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -717,8 +892,11 @@ fun CameraScreen(
                 IconButton(
                     onClick = {
                         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                            mirrorSelfie = true
+                            warmthPercent = 10
                             CameraSelector.LENS_FACING_FRONT
                         } else {
+                            warmthPercent = 0
                             CameraSelector.LENS_FACING_BACK
                         }
                     },
