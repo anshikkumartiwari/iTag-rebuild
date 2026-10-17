@@ -299,7 +299,8 @@ class BleManager(
             _buttonEvents.emit(ButtonEvent.RawNotification(now, data))
         }
 
-        val doubleTapEnabled = preferencesManager?.floaterDoubleTapLike?.value == true
+        val doubleTapEnabled = (preferencesManager?.floaterDoubleTapLike?.value == true) ||
+                (preferencesManager?.findMyPhoneEnabled?.value == true)
 
         if (!doubleTapEnabled) {
             // Instant, zero-delay single click mode!
@@ -317,15 +318,15 @@ class BleManager(
                 _buttonEvents.emit(ButtonEvent.SinglePress(now, rawByte))
             }
         } else {
-            // Double-tap mode is enabled: wait briefly to distinguish single vs double click
+            // Double-tap mode is enabled (for Find My Phone or Floater Like)
             val intervalSinceLastClick = now - lastButtonClickTime
-            if (intervalSinceLastClick < 120) {
+            if (intervalSinceLastClick < 100) {
                 // Ignore contact bounce from same physical press
                 return
             }
 
-            // Check for double click window (between 120ms and 420ms)
-            if (intervalSinceLastClick in 120..420) {
+            // Check for double click window (between 100ms and 500ms)
+            if (intervalSinceLastClick in 100..500) {
                 pendingSingleClickJob?.cancel()
                 pendingSingleClickJob = null
                 lastButtonClickTime = now
@@ -335,11 +336,11 @@ class BleManager(
                     _buttonEvents.emit(ButtonEvent.DoublePress(now, intervalSinceLastClick))
                 }
             } else {
-                // First click: wait up to 380ms to check if a second click arrives
+                // First click: wait up to 400ms to check if a second click arrives
                 lastButtonClickTime = now
                 pendingSingleClickJob?.cancel()
                 pendingSingleClickJob = scope.launch {
-                    delay(380)
+                    delay(400)
                     Log.i(TAG, "Single press confirmed (after double-click window)")
                     _buttonEvents.emit(ButtonEvent.SinglePress(now, rawByte))
                 }
