@@ -164,6 +164,38 @@ class PreferencesManager(context: Context) {
         return sb.toString()
     }
 
+    // Floating Clicker Preferences
+    private val _floaterActionMode = MutableStateFlow(prefs.getString(KEY_FLOATER_MODE, "click") ?: "click")
+    val floaterActionMode: StateFlow<String> = _floaterActionMode.asStateFlow()
+
+    private val _floaterScrollDistanceDp = MutableStateFlow(prefs.getInt(KEY_FLOATER_SCROLL_DP, 550))
+    val floaterScrollDistanceDp: StateFlow<Int> = _floaterScrollDistanceDp.asStateFlow()
+
+    private val _floaterDoubleTapLike = MutableStateFlow(prefs.getBoolean(KEY_FLOATER_DOUBLE_TAP_LIKE, false))
+    val floaterDoubleTapLike: StateFlow<Boolean> = _floaterDoubleTapLike.asStateFlow()
+
+    fun setFloaterActionMode(mode: String) {
+        prefs.edit().putString(KEY_FLOATER_MODE, mode).apply()
+        _floaterActionMode.value = mode
+    }
+
+    fun setFloaterScrollDistanceDp(distanceDp: Int) {
+        val clamped = distanceDp.coerceIn(200, 1200)
+        prefs.edit().putInt(KEY_FLOATER_SCROLL_DP, clamped).apply()
+        _floaterScrollDistanceDp.value = clamped
+    }
+
+    fun setFloaterDoubleTapLike(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_FLOATER_DOUBLE_TAP_LIKE, enabled).apply()
+        _floaterDoubleTapLike.value = enabled
+    }
+
+    fun resetFloaterSettings() {
+        setFloaterActionMode("click")
+        setFloaterScrollDistanceDp(550)
+        setFloaterDoubleTapLike(false)
+    }
+
     companion object {
         private const val KEY_THEME = "app_theme"
         private const val KEY_FRIENDLY_NAME = "device_friendly_name"
@@ -176,5 +208,8 @@ class PreferencesManager(context: Context) {
         private const val KEY_LAST_LOC_TIME = "last_location_time"
         private const val KEY_LAST_LOC_ACC = "last_location_acc"
         private const val KEY_LOCATION_HISTORY = "location_history_json"
+        private const val KEY_FLOATER_MODE = "floater_action_mode"
+        private const val KEY_FLOATER_SCROLL_DP = "floater_scroll_distance_dp"
+        private const val KEY_FLOATER_DOUBLE_TAP_LIKE = "floater_double_tap_like"
     }
 }

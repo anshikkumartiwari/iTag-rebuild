@@ -61,9 +61,13 @@ class IFindApp : Application() {
             bleManager.buttonEvents.collect { event ->
                 when (event) {
                     is ButtonEvent.DoublePress -> {
-                        if (preferencesManager.findMyPhoneEnabled.value) {
+                        val isFloaterLiking = com.ifind.app.service.FloatingClickerService.isFloatingClickerActive.value &&
+                                preferencesManager.floaterDoubleTapLike.value
+                        if (!isFloaterLiking && preferencesManager.findMyPhoneEnabled.value) {
                             Log.i(TAG, "Double press received - triggering Find My Phone!")
                             TrackerMonitorService.triggerFindPhone(this@IFindApp)
+                        } else if (isFloaterLiking) {
+                            Log.i(TAG, "Double press handled as Floater Double-Tap Like. Bypassing Find My Phone.")
                         }
                     }
                     else -> Unit
