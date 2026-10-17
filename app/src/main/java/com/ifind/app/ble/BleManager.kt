@@ -17,6 +17,7 @@ import com.ifind.app.ble.model.ButtonEvent
 import com.ifind.app.ble.model.ConnectionState
 import com.ifind.app.ble.model.DiagnosticCharacteristic
 import com.ifind.app.ble.model.RawBleEvent
+import com.ifind.app.data.PreferencesManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,7 +35,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "BleManager"
 
-class BleManager(private val context: Context) {
+class BleManager(
+    private val context: Context,
+    private val preferencesManager: PreferencesManager? = null
+) {
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
@@ -295,35 +299,50 @@ class BleManager(private val context: Context) {
             _buttonEvents.emit(ButtonEvent.RawNotification(now, data))
         }
 
-        // Detect single click vs double click
-        // Chinese iTAG trackers typically send a burst of 1-3 notifications on click.
-        // We debounce bursts within 250ms as a single physical press.
-        val intervalSinceLastClick = now - lastButtonClickTime
+        val doubleTapEnabled = preferencesManager?.floaterDoubleTapLike?.value == true
 
-        if (intervalSinceLastClick < 250) {
-            // Part of the same burst/re-transmission, ignore
-            return
-        }
-
-        // Check for double click window (between 250ms and 750ms)
-        if (intervalSinceLastClick in 250..750) {
-            // Cancel pending single press
+        if (!doubleTapEnabled) {
+            // Instant, zero-delay single click mode!
+            // Debounce rapid duplicate BLE packets / physical contact bounce from same press within 140ms
+            val intervalSinceLastClick = now - lastButtonClickTime
+            if (intervalSinceLastClick < 140) {
+                return
+            }
+            lastButtonClickTime = now
             pendingSingleClickJob?.cancel()
             pendingSingleClickJob = null
-            lastButtonClickTime = now
 
             scope.launch {
-                Log.i(TAG, "Double press detected! Interval: ${intervalSinceLastClick}ms")
-                _buttonEvents.emit(ButtonEvent.DoublePress(now, intervalSinceLastClick))
+                Log.i(TAG, "Instant single click dispatched (Double-tap disabled)!")
+                _buttonEvents.emit(ButtonEvent.SinglePress(now, rawByte))
             }
         } else {
-            // Potential single click, wait 750ms to verify it's not a double click
-            lastButtonClickTime = now
-            pendingSingleClickJob?.cancel()
-            pendingSingleClickJob = scope.launch {
-                delay(750)
-                Log.i(TAG, "Single press confirmed!")
-                _buttonEvents.emit(ButtonEvent.SinglePress(now, rawByte))
+            // Double-tap mode is enabled: wait briefly to distinguish single vs double click
+            val intervalSinceLastClick = now - lastButtonClickTime
+            if (intervalSinceLastClick < 120) {
+                // Ignore contact bounce from same physical press
+                return
+            }
+
+            // Check for double click window (between 120ms and 420ms)
+            if (intervalSinceLastClick in 120..420) {
+                pendingSingleClickJob?.cancel()
+                pendingSingleClickJob = null
+                lastButtonClickTime = now
+
+                scope.launch {
+                    Log.i(TAG, "Double press detected! Interval: ${intervalSinceLastClick}ms")
+                    _buttonEvents.emit(ButtonEvent.DoublePress(now, intervalSinceLastClick))
+                }
+            } else {
+                // First click: wait up to 380ms to check if a second click arrives
+                lastButtonClickTime = now
+                pendingSingleClickJob?.cancel()
+                pendingSingleClickJob = scope.launch {
+                    delay(380)
+                    Log.i(TAG, "Single press confirmed (after double-click window)")
+                    _buttonEvents.emit(ButtonEvent.SinglePress(now, rawByte))
+                }
             }
         }
     }

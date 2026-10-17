@@ -36,7 +36,7 @@ class IFindApp : Application() {
         instance = this
 
         preferencesManager = PreferencesManager(this)
-        bleManager = BleManager(this)
+        bleManager = BleManager(this, preferencesManager)
         bleScanner = BleScanner(this)
         locationTracker = LocationTracker(this, preferencesManager)
 
