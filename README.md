@@ -1,6 +1,16 @@
 # iFind — Native Android iTAG Companion & Remote Shutter
 
+[![Version](https://img.shields.io/badge/Release-v1.1.0-blue.svg)](release/iFind-v1.1.0.apk)
+[![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](release/iFind-v1.1.0.apk)
+[![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
+
 iFind is a native Android application built in Kotlin and Jetpack Compose. It replaces the original *iSearching* tracker companion app with modern BLE GATT lifecycle handling, a responsive 3-tab consumer design, and an integrated CameraX remote selfie shutter triggered by the tracker's physical button.
+
+### 📥 Direct Downloads & Webpage
+- **Web Landing Page**: [View `index.html`](index.html)
+- **Direct APK**: [Download `iFind-v1.1.0.apk` (20.4 MB)](release/iFind-v1.1.0.apk)
+- **Complete ZIP Bundle**: [Download `iFind-v1.1.0.zip` (19.4 MB)](release/iFind-v1.1.0.zip) *(includes APK, Setup Guide, & Checksums)*
+- **Installation Guide**: [Step-by-Step Android Sideload Guide](release/INSTALLATION_GUIDE.md)
 
 ---
 

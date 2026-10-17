@@ -16,6 +16,7 @@ local.properties
 .idea/
 *.hprof
 *.apk
+!release/*.apk
 *.aab
 *.ap_
 output.json
