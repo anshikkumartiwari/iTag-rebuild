@@ -14,7 +14,9 @@ import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -58,6 +60,34 @@ class FloatingClickerService : Service() {
     private var initialY = 0
     private var initialTouchX = 0f
     private var initialTouchY = 0f
+
+    private var isGestureInProgress = false
+    private var isSimulatingGesture = false
+    private var isViewAttached = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun safeRemoveView() {
+        if (!isViewAttached) return
+        val root = floatingRootView ?: return
+        try {
+            windowManager?.removeView(root)
+            isViewAttached = false
+        } catch (e: Exception) {
+            Log.w(TAG, "Error removing floating view: ${e.message}")
+        }
+    }
+
+    private fun safeAddView() {
+        if (isViewAttached) return
+        val root = floatingRootView ?: return
+        val p = params ?: return
+        try {
+            windowManager?.addView(root, p)
+            isViewAttached = true
+        } catch (e: Exception) {
+            Log.w(TAG, "Error adding floating view: ${e.message}")
+        }
+    }
 
     private var buttonListenerJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main)
@@ -554,6 +584,7 @@ class FloatingClickerService : Service() {
         rootLayout.addView(settingsPanel)
 
         val dragTouchListener = View.OnTouchListener { _, event ->
+            if (isSimulatingGesture) return@OnTouchListener false
             val p = params ?: return@OnTouchListener false
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -566,7 +597,11 @@ class FloatingClickerService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     p.x = initialX + (event.rawX - initialTouchX).toInt()
                     p.y = initialY + (event.rawY - initialTouchY).toInt()
-                    windowManager?.updateViewLayout(rootLayout, p)
+                    if (isViewAttached) {
+                        try {
+                            windowManager?.updateViewLayout(rootLayout, p)
+                        } catch (_: Exception) {}
+                    }
                     true
                 }
                 MotionEvent.ACTION_UP -> true
@@ -580,25 +615,21 @@ class FloatingClickerService : Service() {
         floatingRootView = rootLayout
         try {
             windowManager?.addView(rootLayout, params)
+            isViewAttached = true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add floating view: ${e.message}")
             stopSelf()
         }
     }
 
-    private var isGestureInProgress = false
-
     private fun executeWithOverlayBypass(
+        timeoutMs: Long = 450L,
         action: (targetX: Float, targetY: Float, onFinished: () -> Unit) -> Unit
     ) {
         if (isGestureInProgress) {
             Log.d(TAG, "Ignoring gesture request: another gesture is already in progress")
             return
         }
-
-        val root = floatingRootView ?: return
-        val wm = windowManager ?: return
-        val p = params ?: return
 
         if (!IFindAccessibilityService.isRunning()) {
             Toast.makeText(
@@ -611,59 +642,56 @@ class FloatingClickerService : Service() {
         }
 
         isGestureInProgress = true
+        isSimulatingGesture = true
 
+        val p = params ?: return
+        val density = resources.displayMetrics.density
+
+        // 1. Calculate exact screen coordinates of the reticle center dot while view is still attached
         val location = IntArray(2)
         centerDotView?.getLocationOnScreen(location)
-        val density = resources.displayMetrics.density
-        val fallbackX = p.x + (44f * density)
-        val fallbackY = p.y + (44f * density)
+        val dotW = centerDotView?.width ?: 0
+        val dotH = centerDotView?.height ?: 0
 
-        val targetX = if (location[0] > 0 && (centerDotView?.width ?: 0) > 0) {
-            location[0] + (centerDotView?.width ?: 0) / 2f
+        val targetX = if (dotW > 0 && location[0] > 0) {
+            location[0] + dotW / 2f
         } else {
-            fallbackX
-        }
-        val targetY = if (location[1] > 0 && (centerDotView?.height ?: 0) > 0) {
-            location[1] + (centerDotView?.height ?: 0) / 2f
-        } else {
-            fallbackY
+            p.x + (44f * density)
         }
 
-        // 1. Temporarily set FLAG_NOT_TOUCHABLE so synthetic touches fall through to target app
-        val originalFlags = p.flags
-        p.flags = originalFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        try {
-            wm.updateViewLayout(root, p)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to update flags to FLAG_NOT_TOUCHABLE: ${e.message}")
+        val targetY = if (dotH > 0 && location[1] > 0) {
+            location[1] + dotH / 2f
+        } else {
+            p.y + (44f * density)
         }
+
+        // 2. Temporarily detach the overlay so the underlying target app is 100% unobstructed
+        // and cannot be intercepted or blocked by Android's untrusted touch filter
+        safeRemoveView()
 
         var isRestored = false
-        fun restoreFlags() {
+        fun restoreOverlay() {
             if (isRestored) return
             isRestored = true
+            safeAddView()
+            isSimulatingGesture = false
             isGestureInProgress = false
-            p.flags = originalFlags
-            try {
-                wm.updateViewLayout(root, p)
-            } catch (_: Exception) {}
         }
 
-        // Safety fallback: restore touchability if callback is delayed or lost
         val safetyRunnable = Runnable {
-            restoreFlags()
+            restoreOverlay()
         }
-        root.postDelayed(safetyRunnable, 600L)
+        mainHandler.postDelayed(safetyRunnable, timeoutMs)
 
-        // 2. Dispatch gesture after brief 40ms sync delay for WindowManager/InputDispatcher to apply flag
-        root.postDelayed({
+        // 3. Dispatch gesture after brief 35ms delay to ensure WindowManager/InputDispatcher has flushed the window removal
+        mainHandler.postDelayed({
             action(targetX, targetY) {
-                root.removeCallbacks(safetyRunnable)
-                root.post {
-                    restoreFlags()
+                mainHandler.removeCallbacks(safetyRunnable)
+                mainHandler.post {
+                    restoreOverlay()
                 }
             }
-        }, 40L)
+        }, 35L)
     }
 
     private fun listenToTrackerButtonEvents() {
@@ -673,7 +701,6 @@ class FloatingClickerService : Service() {
 
         buttonListenerJob = scope.launch {
             bleManager.buttonEvents.collect { event ->
-                val root = floatingRootView ?: return@collect
                 val density = resources.displayMetrics.density
 
                 try {
@@ -686,25 +713,25 @@ class FloatingClickerService : Service() {
                                 val distanceDp = prefs.floaterScrollDistanceDp.value
                                 val distancePx = distanceDp * density
 
-                                animateScrollFeedback(root)
-
-                                executeWithOverlayBypass { targetX, targetY, onFinished ->
+                                executeWithOverlayBypass(timeoutMs = 500L) { _, _, onFinished ->
                                     val dispatched = IFindAccessibilityService.scrollVerticalAt(
-                                        startX = targetX,
-                                        startY = targetY,
                                         distancePx = distancePx,
-                                        onComplete = onFinished
+                                        onComplete = {
+                                            floatingRootView?.let { animateScrollFeedback(it) }
+                                            onFinished()
+                                        }
                                     )
-                                    Log.d(TAG, "Floater scrollVerticalAt ($targetX, $targetY) dist=$distancePx dispatched=$dispatched")
+                                    Log.d(TAG, "Floater scrollVerticalAt dist=$distancePx dispatched=$dispatched")
                                 }
                             } else {
-                                animateClickFeedback(root)
-
-                                executeWithOverlayBypass { targetX, targetY, onFinished ->
+                                executeWithOverlayBypass(timeoutMs = 400L) { targetX, targetY, onFinished ->
                                     val dispatched = IFindAccessibilityService.clickAt(
                                         x = targetX,
                                         y = targetY,
-                                        onComplete = onFinished
+                                        onComplete = {
+                                            floatingRootView?.let { animateClickFeedback(it) }
+                                            onFinished()
+                                        }
                                     )
                                     Log.d(TAG, "Floater clickAt ($targetX, $targetY) dispatched=$dispatched")
                                 }
@@ -715,13 +742,15 @@ class FloatingClickerService : Service() {
                             if (prefs.floaterDoubleTapLike.value) {
                                 Log.i(TAG, "Double press: executing Double-Tap Like")
                                 vibratePhone()
-                                animateClickFeedback(root)
 
-                                executeWithOverlayBypass { targetX, targetY, onFinished ->
+                                executeWithOverlayBypass(timeoutMs = 600L) { targetX, targetY, onFinished ->
                                     val dispatched = IFindAccessibilityService.doubleClickAt(
                                         x = targetX,
                                         y = targetY,
-                                        onComplete = onFinished
+                                        onComplete = {
+                                            floatingRootView?.let { animateClickFeedback(it) }
+                                            onFinished()
+                                        }
                                     )
                                     Log.d(TAG, "Floater doubleClickAt ($targetX, $targetY) dispatched=$dispatched")
                                 }
@@ -783,11 +812,7 @@ class FloatingClickerService : Service() {
 
     override fun onDestroy() {
         buttonListenerJob?.cancel()
-        floatingRootView?.let { view ->
-            try {
-                windowManager?.removeView(view)
-            } catch (_: Exception) {}
-        }
+        safeRemoveView()
         floatingRootView = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)

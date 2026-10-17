@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.content.Context
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,7 +51,23 @@ class IFindAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    fun click(x: Float, y: Float, durationMs: Long = 60L, onComplete: (() -> Unit)? = null): Boolean {
+    private fun getScreenDimensions(): Pair<Float, Float> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val wm = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            val bounds = wm?.currentWindowMetrics?.bounds
+            if (bounds != null) {
+                Pair(bounds.width().toFloat(), bounds.height().toFloat())
+            } else {
+                val dm = resources.displayMetrics
+                Pair(dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
+            }
+        } else {
+            val dm = resources.displayMetrics
+            Pair(dm.widthPixels.toFloat(), dm.heightPixels.toFloat())
+        }
+    }
+
+    fun click(x: Float, y: Float, durationMs: Long = 50L, onComplete: (() -> Unit)? = null): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             Log.w(TAG, "dispatchGesture requires Android N (API 24)+")
             onComplete?.invoke()
@@ -57,21 +75,19 @@ class IFindAccessibilityService : AccessibilityService() {
         }
 
         return try {
-            val dm = resources.displayMetrics
-            val screenW = dm.widthPixels.toFloat()
-            val screenH = dm.heightPixels.toFloat()
+            val (screenW, screenH) = getScreenDimensions()
 
             // Clamp coordinates safely within screen boundaries
-            val safeX = x.coerceIn(10f, (screenW - 10f).coerceAtLeast(10f))
-            val safeY = y.coerceIn(10f, (screenH - 10f).coerceAtLeast(10f))
+            val safeX = x.coerceIn(5f, screenW - 5f)
+            val safeY = y.coerceIn(5f, screenH - 5f)
 
-            // 1-pixel line segment ensures Android InputDispatcher validates non-empty stroke without drift
+            // 1-pixel micro line ensures Android InputDispatcher validates non-empty stroke without drift
             val clickPath = Path().apply {
                 moveTo(safeX, safeY)
                 lineTo(safeX, safeY + 1f)
             }
 
-            val stroke = GestureDescription.StrokeDescription(clickPath, 0L, durationMs.coerceIn(30L, 150L))
+            val stroke = GestureDescription.StrokeDescription(clickPath, 0L, durationMs.coerceIn(30L, 120L))
             val gesture = GestureDescription.Builder()
                 .addStroke(stroke)
                 .build()
@@ -107,12 +123,10 @@ class IFindAccessibilityService : AccessibilityService() {
         }
 
         return try {
-            val dm = resources.displayMetrics
-            val screenW = dm.widthPixels.toFloat()
-            val screenH = dm.heightPixels.toFloat()
+            val (screenW, screenH) = getScreenDimensions()
 
-            val safeX = x.coerceIn(10f, (screenW - 10f).coerceAtLeast(10f))
-            val safeY = y.coerceIn(10f, (screenH - 10f).coerceAtLeast(10f))
+            val safeX = x.coerceIn(5f, screenW - 5f)
+            val safeY = y.coerceIn(5f, screenH - 5f)
 
             val path1 = Path().apply {
                 moveTo(safeX, safeY)
@@ -124,8 +138,8 @@ class IFindAccessibilityService : AccessibilityService() {
             }
 
             // Atomic double-tap with two strokes in a single gesture
-            val stroke1 = GestureDescription.StrokeDescription(path1, 0L, tapDurationMs.coerceIn(30L, 100L))
-            val stroke2 = GestureDescription.StrokeDescription(path2, tapDurationMs + gapMs, tapDurationMs.coerceIn(30L, 100L))
+            val stroke1 = GestureDescription.StrokeDescription(path1, 0L, tapDurationMs.coerceIn(30L, 80L))
+            val stroke2 = GestureDescription.StrokeDescription(path2, tapDurationMs + gapMs, tapDurationMs.coerceIn(30L, 80L))
 
             val gesture = GestureDescription.Builder()
                 .addStroke(stroke1)
@@ -155,7 +169,12 @@ class IFindAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun scrollVertical(startX: Float, startY: Float, distancePx: Float, durationMs: Long = 280L, onComplete: (() -> Unit)? = null): Boolean {
+    fun scrollVertical(
+        distancePx: Float,
+        customStartX: Float? = null,
+        durationMs: Long = 260L,
+        onComplete: (() -> Unit)? = null
+    ): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             Log.w(TAG, "dispatchGesture requires Android N (API 24)+")
             onComplete?.invoke()
@@ -163,32 +182,31 @@ class IFindAccessibilityService : AccessibilityService() {
         }
 
         return try {
-            val dm = resources.displayMetrics
-            val screenW = dm.widthPixels.toFloat()
-            val screenH = dm.heightPixels.toFloat()
+            val (screenW, screenH) = getScreenDimensions()
 
-            // Keep horizontal swipe safely within central 70% to avoid system edge gestures
-            val safeStartX = startX.coerceIn(screenW * 0.15f, screenW * 0.85f)
-            // Start vertical swipe from user position, or sensible reel flick zone
-            val safeStartY = startY.coerceIn(screenH * 0.40f, screenH * 0.85f)
+            // Horizontal position: Center of the screen (safe from edge back-gesture zones)
+            val safeX = customStartX?.coerceIn(screenW * 0.30f, screenW * 0.70f) ?: (screenW * 0.50f)
 
-            // Clamp endY to be strictly positive and strictly above startY (swipe up to advance reel)
-            val targetDistance = distancePx.coerceIn(200f, screenH * 0.70f)
-            val safeEndY = (safeStartY - targetDistance).coerceIn(60f, safeStartY - 100f)
+            // Vertical scroll: Starts in the natural lower flick zone (~72% screen height)
+            val startY = screenH * 0.72f
+
+            // Distance to swipe: Clamped to healthy flick distance (between 25% and 55% screen height)
+            val targetDistance = distancePx.coerceIn(screenH * 0.25f, screenH * 0.55f)
+            val endY = (startY - targetDistance).coerceIn(screenH * 0.18f, startY - 150f)
 
             val scrollPath = Path().apply {
-                moveTo(safeStartX, safeStartY)
-                lineTo(safeStartX, safeEndY)
+                moveTo(safeX, startY)
+                lineTo(safeX, endY)
             }
 
-            val stroke = GestureDescription.StrokeDescription(scrollPath, 0L, durationMs.coerceIn(180L, 400L))
+            val stroke = GestureDescription.StrokeDescription(scrollPath, 0L, durationMs.coerceIn(180L, 350L))
             val gesture = GestureDescription.Builder()
                 .addStroke(stroke)
                 .build()
 
             val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    Log.i(TAG, "Scroll gesture completed: from ($safeStartX, $safeStartY) to ($safeStartX, $safeEndY)")
+                    Log.i(TAG, "Scroll gesture completed: from ($safeX, $startY) to ($safeX, $endY)")
                     onComplete?.invoke()
                 }
 
@@ -198,7 +216,7 @@ class IFindAccessibilityService : AccessibilityService() {
                 }
             }, null)
 
-            Log.i(TAG, "dispatchGesture scroll from $safeStartY to $safeEndY: dispatched=$dispatched")
+            Log.i(TAG, "dispatchGesture scroll from $startY to $endY: dispatched=$dispatched")
             if (!dispatched) {
                 onComplete?.invoke()
             }
@@ -219,7 +237,7 @@ class IFindAccessibilityService : AccessibilityService() {
 
         fun isRunning(): Boolean = instance != null
 
-        fun clickAt(x: Float, y: Float, durationMs: Long = 60L, onComplete: (() -> Unit)? = null): Boolean {
+        fun clickAt(x: Float, y: Float, durationMs: Long = 50L, onComplete: (() -> Unit)? = null): Boolean {
             return instance?.click(x, y, durationMs, onComplete) ?: run {
                 onComplete?.invoke()
                 false
@@ -233,8 +251,26 @@ class IFindAccessibilityService : AccessibilityService() {
             }
         }
 
-        fun scrollVerticalAt(startX: Float, startY: Float, distancePx: Float, durationMs: Long = 280L, onComplete: (() -> Unit)? = null): Boolean {
-            return instance?.scrollVertical(startX, startY, distancePx, durationMs, onComplete) ?: run {
+        fun scrollVerticalAt(
+            distancePx: Float,
+            startX: Float? = null,
+            durationMs: Long = 260L,
+            onComplete: (() -> Unit)? = null
+        ): Boolean {
+            return instance?.scrollVertical(distancePx, startX, durationMs, onComplete) ?: run {
+                onComplete?.invoke()
+                false
+            }
+        }
+
+        fun scrollVerticalAt(
+            startX: Float,
+            startY: Float,
+            distancePx: Float,
+            durationMs: Long = 260L,
+            onComplete: (() -> Unit)? = null
+        ): Boolean {
+            return instance?.scrollVertical(distancePx, startX, durationMs, onComplete) ?: run {
                 onComplete?.invoke()
                 false
             }
