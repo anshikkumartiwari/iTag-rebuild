@@ -228,8 +228,10 @@ fun SettingsScreen(
             }
         }
 
-        // Accessibility & Floating Auto-Clicker
-        SettingsCard(title = "Auto-Clicker & Accessibility", icon = Icons.Rounded.TouchApp) {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Floating Clicker Settings
+        SettingsCard(title = "Floating Clicker Settings", icon = Icons.Rounded.TouchApp) {
             Text(
                 text = "To trigger clicks in third-party camera apps (Motorola Camera, GCam, Instagram), iFind uses a floating target and Accessibility Service to tap the screen remotely.",
                 style = MaterialTheme.typography.bodyMedium,
