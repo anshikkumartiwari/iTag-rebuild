@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">iFind</string>
+    <string name="accessibility_description">iFind Accessibility Service allows your physical iTAG tracker button to tap the screen remotely at the floating target position, enabling remote camera shutter in third-party camera apps.</string>
 </resources>

@@ -69,16 +69,18 @@ com.ifind.app
 ├── location/
 │   └── LocationTracker.kt          # Phone GPS capture on connect/disconnect & Maps intent
 ├── service/
-│   └── TrackerMonitorService.kt    # Foreground service for background monitoring & alarms
+│   ├── TrackerMonitorService.kt    # Foreground service for background monitoring & alarms
+│   ├── FloatingClickerService.kt   # Draggable Auto-Clicker overlay target for 3rd-party apps
+│   └── IFindAccessibilityService.kt# Accessibility Service dispatching clicks at target
 └── ui/
     ├── navigation/
     │   ├── Screen.kt               # Navigation routes
     │   └── BottomNavBar.kt         # Sleek navigation bar for Device, Location, Settings
     ├── screens/
-    │   ├── DeviceScreen.kt         # Tracker dashboard, battery, RSSI, Find Device, scan sheet
-    │   ├── DiagnosticsScreen.kt    # FFE1 packet logger, gesture verifier, GATT inspector
+    │   ├── DeviceScreen.kt         # Tracker dashboard, battery, RSSI, Find Device, Auto-Clicker card
+    │   ├── DiagnosticsScreen.kt    # FFE1 packet logger, gesture verifier, GATT inspector & tester
     │   ├── LocationScreen.kt       # Last-known location card & Google Maps launch
-    │   ├── SettingsScreen.kt       # Theme (System/Light/Dark), camera countdown, alert toggles
+    │   ├── SettingsScreen.kt       # Theme (System/Light/Dark), accessibility shortcuts, alert toggles
     │   └── CameraScreen.kt         # CameraX preview, remote shutter, flash, gallery save
     └── theme/
         ├── Color.kt                # Luxury deep obsidian & electric cyan palette
@@ -98,27 +100,29 @@ com.ifind.app
   - BLE scanning, discovery, and manual connection/disconnection.
 
 - [x] **Phase 2 — Tracker Diagnostics & Protocol Verification**:
-  - Battery level reading (`0x2A19`) and CCCD subscription (with strict distinction between unavailable reading and 0%).
+  - Battery level reading (`0x2A19`) with manual refresh button and direct GATT read fallback.
   - RSSI signal strength reading with manual refresh and quality indicator.
-  - `0xFFE1` CCCD subscription with thread-safe GATT command queue.
+  - `0xFFE1` CCCD subscription with atomic GATT command queue.
   - Real-time diagnostic logger showing raw hex bytes, millisecond timestamps, and delta times.
   - Physical button test suite (single click vs double click).
-  - Reconnection handling and error recovery.
+  - Fixed duplicate key in GATT Inspector and added direct Characteristic write testing (`0x01` / `0x02`).
 
 - [x] **Phase 3 — Tracker Functions**:
-  - Find Device: Start Alarm (`0x02` on `0x1802/0x2A06`) and Stop Alarm (`0x00`).
-  - Disconnect Alert toggle and background broadcast.
-  - Find My Phone: Double-press detection triggering audible phone alarm.
+  - Find Device: Multi-vector Start Alarm (Immediate Alert `0x1802/0x2A06` with response & no-response + Vendor `0xFFE0/0xFFE2`).
+  - Buzzer Diagnostic Test Suite: test individual commands to find your exact hardware buzzer byte.
+  - Disconnect Alert toggle and background broadcast (verified working on device!).
+  - Find My Phone: Double-press detection triggering audible phone alarm (verified working on device!).
 
-- [x] **Phase 4 — Remote Camera**:
-  - CameraX full-screen viewfinder with front/back camera switching.
-  - Remote shutter triggered by physical button events (`ButtonEvent.SinglePress`).
+- [x] **Phase 4 — Remote Camera & Floating Auto-Clicker**:
+  - **In-App Camera**: CameraX full-screen viewfinder with physical button remote shutter.
+  - **System-Wide Auto-Clicker Shutter**: Draggable floating reticle target overlay (`FloatingClickerService`) combined with `IFindAccessibilityService` synthetic gestures (`dispatchGesture`).
+  - Works on ANY third-party camera app (Motorola Camera, Google Camera, Instagram, Snapchat, WhatsApp).
   - Configurable countdown timer (Instant, 3s, 5s).
   - Flash control (Auto, On, Off).
   - MediaStore gallery photo storage.
 
 - [x] **Phase 5 — Location, Settings and Background Monitoring**:
-  - Phone location logging on tracker disconnect/connect.
+  - Phone location logging on tracker disconnect/connect (verified working on device!).
   - "Open in Maps" navigation fallback.
   - Local persistence via SharedPreferences.
   - Foreground monitoring service (`TrackerMonitorService`).

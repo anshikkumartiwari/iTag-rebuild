@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "BleManager"
 
@@ -53,6 +54,9 @@ class BleManager(private val context: Context) {
 
     private val _batteryLevel = MutableStateFlow<Int?>(null)
     val batteryLevel: StateFlow<Int?> = _batteryLevel.asStateFlow()
+
+    private val _isBatteryReading = MutableStateFlow(false)
+    val isBatteryReading: StateFlow<Boolean> = _isBatteryReading.asStateFlow()
 
     private val _rssi = MutableStateFlow<Int?>(null)
     val rssi: StateFlow<Int?> = _rssi.asStateFlow()
@@ -94,6 +98,7 @@ class BleManager(private val context: Context) {
     private val gattQueue = Channel<GattOp>(Channel.UNLIMITED)
     private var isProcessingQueue = false
     private var queueWaitJob: Job? = null
+    private val isWaitingCallback = AtomicBoolean(false)
 
     private val gattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
@@ -129,7 +134,7 @@ class BleManager(private val context: Context) {
                         _connectionState.value = ConnectionState.Connected
                         _connectedDeviceAddress.value = device?.address
                         _connectedDeviceName.value = try { device?.name } catch (e: SecurityException) { null }
-                        delay(300) // Brief delay to stabilize connection on Telink/Lenze chips
+                        delay(400) // Brief delay to stabilize connection on Telink/Lenze chips
                         _connectionState.value = ConnectionState.DiscoveringServices
                         gatt?.discoverServices()
                     }
@@ -173,11 +178,16 @@ class BleManager(private val context: Context) {
                 // Configure notifications and read battery
                 setupTrackerSubscriptions(gatt)
                 readRssi()
+
+                // Explicit delay then read battery directly
+                delay(800)
+                readBatteryLevel()
             }
         }
 
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicRead(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
             characteristic ?: return
             @Suppress("DEPRECATION")
             val data = characteristic.value ?: ByteArray(0)
@@ -192,6 +202,7 @@ class BleManager(private val context: Context) {
 
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
             characteristic ?: return
             @Suppress("DEPRECATION")
             val data = characteristic.value ?: ByteArray(0)
@@ -221,12 +232,16 @@ class BleManager(private val context: Context) {
     }
 
     private fun handleCharacteristicRead(uuid: UUID, data: ByteArray, status: Int) {
-        if (status != BluetoothGatt.GATT_SUCCESS) return
+        _isBatteryReading.value = false
+        if (status != BluetoothGatt.GATT_SUCCESS) {
+            Log.w(TAG, "handleCharacteristicRead error: status=$status for char=$uuid")
+            return
+        }
 
         if (uuid == BleConstants.BATTERY_LEVEL_CHAR_UUID && data.isNotEmpty()) {
             val level = data[0].toInt() and 0xFF
             _batteryLevel.value = level.coerceIn(0, 100)
-            Log.d(TAG, "Battery level read: $level%")
+            Log.i(TAG, "Battery level successfully read: $level%")
         }
 
         // Update diagnostic list
@@ -315,6 +330,7 @@ class BleManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun setupTrackerSubscriptions(gatt: BluetoothGatt) {
+        // Subscribe to FFE1 button notifications
         val ffe0Service = gatt.getService(BleConstants.CUSTOM_SERVICE_FFE0_UUID)
         val ffe1Char = ffe0Service?.getCharacteristic(BleConstants.NOTIFY_CHAR_FFE1_UUID)
 
@@ -326,17 +342,28 @@ class BleManager(private val context: Context) {
             }
         }
 
+        // Subscribe to Battery Service
         val batteryService = gatt.getService(BleConstants.BATTERY_SERVICE_UUID)
         val batteryChar = batteryService?.getCharacteristic(BleConstants.BATTERY_LEVEL_CHAR_UUID)
         if (batteryChar != null) {
-            // Read initial battery
-            enqueueOp(GattOp.ReadChar(BleConstants.BATTERY_SERVICE_UUID, BleConstants.BATTERY_LEVEL_CHAR_UUID))
-            // Enable notifications if CCCD present
             val cccd = batteryChar.getDescriptor(BleConstants.CCCD_DESCRIPTOR_UUID)
             if (cccd != null) {
                 gatt.setCharacteristicNotification(batteryChar, true)
                 enqueueOp(GattOp.WriteDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE))
             }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun readBatteryLevel() {
+        val gatt = bluetoothGatt ?: return
+        val batteryService = gatt.getService(BleConstants.BATTERY_SERVICE_UUID)
+        val batteryChar = batteryService?.getCharacteristic(BleConstants.BATTERY_LEVEL_CHAR_UUID)
+        if (batteryChar != null) {
+            _isBatteryReading.value = true
+            enqueueOp(GattOp.ReadChar(BleConstants.BATTERY_SERVICE_UUID, BleConstants.BATTERY_LEVEL_CHAR_UUID))
+        } else {
+            Log.w(TAG, "Battery Service or Characteristic not found on GATT server")
         }
     }
 
@@ -348,18 +375,18 @@ class BleManager(private val context: Context) {
                 val writable = (char.properties and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)) != 0
                 val notifiable = (char.properties and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE)) != 0
 
-                val name = when (char.uuid) {
-                    BleConstants.BATTERY_LEVEL_CHAR_UUID -> "Battery Level (2A19)"
-                    BleConstants.LINK_LOSS_ALERT_LEVEL_CHAR_UUID -> "Link Loss Alert Level (2A06)"
-                    BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID -> "Immediate Alert Level (2A06)"
-                    BleConstants.NOTIFY_CHAR_FFE1_UUID -> "Button Notify (FFE1)"
-                    BleConstants.WRITE_CHAR_FFE2_UUID -> "Custom Write (FFE2)"
-                    BleConstants.READ_CHAR_FFE3_UUID -> "Custom Read (FFE3)"
-                    BleConstants.RW_CHAR_FFE4_UUID -> "Custom Read/Write (FFE4)"
-                    BleConstants.WRITE_CHAR_FFE5_UUID -> "Custom Write (FFE5)"
-                    BleConstants.READ_CHAR_FFE6_UUID -> "Custom Read (FFE6)"
-                    BleConstants.RW_CHAR_FFE7_UUID -> "Custom Read/Write (FFE7)"
-                    else -> BleConstants.shortUuid(char.uuid)
+                val name = when {
+                    service.uuid == BleConstants.BATTERY_SERVICE_UUID && char.uuid == BleConstants.BATTERY_LEVEL_CHAR_UUID -> "Battery Level (2A19)"
+                    service.uuid == BleConstants.LINK_LOSS_SERVICE_UUID && char.uuid == BleConstants.LINK_LOSS_ALERT_LEVEL_CHAR_UUID -> "Link Loss Alert Level (2A06)"
+                    service.uuid == BleConstants.IMMEDIATE_ALERT_SERVICE_UUID && char.uuid == BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID -> "Immediate Alert Level (2A06)"
+                    char.uuid == BleConstants.NOTIFY_CHAR_FFE1_UUID -> "Button Notify (FFE1)"
+                    char.uuid == BleConstants.WRITE_CHAR_FFE2_UUID -> "Custom Write (FFE2)"
+                    char.uuid == BleConstants.READ_CHAR_FFE3_UUID -> "Custom Read (FFE3)"
+                    char.uuid == BleConstants.RW_CHAR_FFE4_UUID -> "Custom Read/Write (FFE4)"
+                    char.uuid == BleConstants.WRITE_CHAR_FFE5_UUID -> "Custom Write (FFE5)"
+                    char.uuid == BleConstants.READ_CHAR_FFE6_UUID -> "Custom Read (FFE6)"
+                    char.uuid == BleConstants.RW_CHAR_FFE7_UUID -> "Custom Read/Write (FFE7)"
+                    else -> "${BleConstants.shortUuid(char.uuid)} (${BleConstants.shortUuid(service.uuid)})"
                 }
 
                 list.add(
@@ -432,6 +459,7 @@ class BleManager(private val context: Context) {
         }
         bluetoothGatt = null
         isProcessingQueue = false
+        isWaitingCallback.set(false)
         queueWaitJob?.cancel()
     }
 
@@ -448,41 +476,112 @@ class BleManager(private val context: Context) {
         }
     }
 
+    /**
+     * Start Alarm: Multi-vector command targeting Immediate Alert (0x02, 0x01 with response & no-response)
+     * as well as vendor Characteristic FFE2.
+     */
     @SuppressLint("MissingPermission")
     fun startAlarm() {
         val gatt = bluetoothGatt ?: return
-        val service = gatt.getService(BleConstants.IMMEDIATE_ALERT_SERVICE_UUID)
-        val char = service?.getCharacteristic(BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID)
-        if (char != null) {
+        var sent = false
+
+        // 1. Immediate Alert Service (0x1802 -> 0x2A06)
+        val immService = gatt.getService(BleConstants.IMMEDIATE_ALERT_SERVICE_UUID)
+        val immChar = immService?.getCharacteristic(BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID)
+        if (immChar != null) {
+            // Write High Alert (0x02) with DEFAULT (write with response)
             enqueueOp(
                 GattOp.WriteChar(
-                    characteristic = char,
+                    characteristic = immChar,
+                    value = byteArrayOf(BleConstants.ALERT_LEVEL_HIGH),
+                    writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+            )
+            // Also enqueue with NO_RESPONSE for chips requiring unacknowledged packets
+            enqueueOp(
+                GattOp.WriteChar(
+                    characteristic = immChar,
                     value = byteArrayOf(BleConstants.ALERT_LEVEL_HIGH),
                     writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                 )
             )
+            sent = true
+        }
+
+        // 2. Custom Characteristic FFE2 (used in Telink / Lenze chips for buzzer)
+        val ffe0Service = gatt.getService(BleConstants.CUSTOM_SERVICE_FFE0_UUID)
+        val ffe2Char = ffe0Service?.getCharacteristic(BleConstants.WRITE_CHAR_FFE2_UUID)
+        if (ffe2Char != null) {
+            enqueueOp(
+                GattOp.WriteChar(
+                    characteristic = ffe2Char,
+                    value = byteArrayOf(0x01),
+                    writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+            )
+            sent = true
+        }
+
+        if (sent) {
             _isAlarmActive.value = true
-            _statusMessage.value = "Beep command sent to tracker"
+            _statusMessage.value = "Alarm command transmitted (0x1802 & FFE2)"
         } else {
-            _statusMessage.value = "Immediate Alert Service not available on device"
+            _statusMessage.value = "Alarm characteristics not found on tracker"
         }
     }
 
     @SuppressLint("MissingPermission")
     fun stopAlarm() {
         val gatt = bluetoothGatt ?: return
-        val service = gatt.getService(BleConstants.IMMEDIATE_ALERT_SERVICE_UUID)
-        val char = service?.getCharacteristic(BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID)
-        if (char != null) {
+
+        // 1. Immediate Alert Service (0x1802 -> 0x2A06)
+        val immService = gatt.getService(BleConstants.IMMEDIATE_ALERT_SERVICE_UUID)
+        val immChar = immService?.getCharacteristic(BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID)
+        if (immChar != null) {
             enqueueOp(
                 GattOp.WriteChar(
-                    characteristic = char,
+                    characteristic = immChar,
+                    value = byteArrayOf(BleConstants.ALERT_LEVEL_NO_ALERT),
+                    writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+            )
+            enqueueOp(
+                GattOp.WriteChar(
+                    characteristic = immChar,
                     value = byteArrayOf(BleConstants.ALERT_LEVEL_NO_ALERT),
                     writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                 )
             )
-            _isAlarmActive.value = false
-            _statusMessage.value = "Alarm stop command sent"
+        }
+
+        // 2. Custom Characteristic FFE2
+        val ffe0Service = gatt.getService(BleConstants.CUSTOM_SERVICE_FFE0_UUID)
+        val ffe2Char = ffe0Service?.getCharacteristic(BleConstants.WRITE_CHAR_FFE2_UUID)
+        if (ffe2Char != null) {
+            enqueueOp(
+                GattOp.WriteChar(
+                    characteristic = ffe2Char,
+                    value = byteArrayOf(0x00),
+                    writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+            )
+        }
+
+        _isAlarmActive.value = false
+        _statusMessage.value = "Stop alarm command transmitted"
+    }
+
+    /**
+     * Direct test write for diagnostic exploration
+     */
+    @SuppressLint("MissingPermission")
+    fun testWriteCharacteristic(serviceUuid: UUID, charUuid: UUID, payload: ByteArray, writeType: Int) {
+        val gatt = bluetoothGatt ?: return
+        val service = gatt.getService(serviceUuid)
+        val char = service?.getCharacteristic(charUuid)
+        if (char != null) {
+            enqueueOp(GattOp.WriteChar(char, payload, writeType))
+            _statusMessage.value = "Sent 0x${payload.joinToString("") { "%02X".format(it) }} to ${BleConstants.shortUuid(charUuid)}"
         }
     }
 
@@ -505,7 +604,7 @@ class BleManager(private val context: Context) {
     fun readDiagnosticCharacteristic(serviceUuid: UUID, charUuid: UUID) {
         scope.launch {
             _diagnosticCharacteristics.value = _diagnosticCharacteristics.value.map {
-                if (it.characteristicUuid == charUuid) it.copy(isReading = true) else it
+                if (it.characteristicUuid == charUuid && it.serviceUuid == serviceUuid) it.copy(isReading = true) else it
             }
             enqueueOp(GattOp.ReadChar(serviceUuid, charUuid))
         }
@@ -531,12 +630,13 @@ class BleManager(private val context: Context) {
         scope.launch {
             val op = gattQueue.tryReceive().getOrNull() ?: return@launch
             isProcessingQueue = true
+            isWaitingCallback.set(true)
 
-            // Safety timeout: if device does not reply in 2.5s, unblock queue
+            // Safety timeout: if device does not reply in 1500ms, unblock queue
             queueWaitJob?.cancel()
             queueWaitJob = scope.launch {
-                delay(2500)
-                Log.w(TAG, "GATT Op timed out, continuing queue")
+                delay(1500)
+                Log.w(TAG, "GATT Op timed out, unblocking queue")
                 notifyQueueOpDone()
             }
 
@@ -546,7 +646,8 @@ class BleManager(private val context: Context) {
                     val char = service?.getCharacteristic(op.charUuid)
                     if (char != null) {
                         try {
-                            gatt.readCharacteristic(char)
+                            val ok = gatt.readCharacteristic(char)
+                            if (!ok) notifyQueueOpDone()
                         } catch (e: Exception) {
                             notifyQueueOpDone()
                         }
@@ -557,12 +658,16 @@ class BleManager(private val context: Context) {
                 is GattOp.WriteDescriptor -> {
                     try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            gatt.writeDescriptor(op.descriptor, op.value)
+                            val res = gatt.writeDescriptor(op.descriptor, op.value)
+                            if (res != android.bluetooth.BluetoothStatusCodes.SUCCESS) {
+                                notifyQueueOpDone()
+                            }
                         } else {
                             @Suppress("DEPRECATION")
                             op.descriptor.value = op.value
                             @Suppress("DEPRECATION")
-                            gatt.writeDescriptor(op.descriptor)
+                            val ok = gatt.writeDescriptor(op.descriptor)
+                            if (!ok) notifyQueueOpDone()
                         }
                     } catch (e: Exception) {
                         notifyQueueOpDone()
@@ -570,22 +675,20 @@ class BleManager(private val context: Context) {
                 }
                 is GattOp.WriteChar -> {
                     try {
+                        op.characteristic.writeType = op.writeType
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            gatt.writeCharacteristic(op.characteristic, op.value, op.writeType)
+                            val res = gatt.writeCharacteristic(op.characteristic, op.value, op.writeType)
+                            if (res != android.bluetooth.BluetoothStatusCodes.SUCCESS) {
+                                notifyQueueOpDone()
+                            }
                         } else {
                             @Suppress("DEPRECATION")
                             op.characteristic.value = op.value
                             @Suppress("DEPRECATION")
-                            op.characteristic.writeType = op.writeType
-                            @Suppress("DEPRECATION")
-                            gatt.writeCharacteristic(op.characteristic)
+                            val ok = gatt.writeCharacteristic(op.characteristic)
+                            if (!ok) notifyQueueOpDone()
                         }
                     } catch (e: Exception) {
-                        notifyQueueOpDone()
-                    }
-                    if (op.writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
-                        // Write without response does not trigger onCharacteristicWrite callback
-                        delay(50)
                         notifyQueueOpDone()
                     }
                 }
@@ -594,9 +697,11 @@ class BleManager(private val context: Context) {
     }
 
     private fun notifyQueueOpDone() {
-        queueWaitJob?.cancel()
-        queueWaitJob = null
-        isProcessingQueue = false
-        processNextOp()
+        if (isWaitingCallback.compareAndSet(true, false)) {
+            queueWaitJob?.cancel()
+            queueWaitJob = null
+            isProcessingQueue = false
+            processNextOp()
+        }
     }
 }

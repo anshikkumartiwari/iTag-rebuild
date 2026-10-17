@@ -1,5 +1,8 @@
 package com.ifind.app.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -28,23 +31,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Accessibility
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BluetoothDisabled
+import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.SignalCellularAlt
-import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,15 +83,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ifind.app.ble.BleConstants
 import com.ifind.app.ble.BleManager
 import com.ifind.app.ble.BleScanner
 import com.ifind.app.ble.model.ConnectionState
 import com.ifind.app.ble.model.DiscoveredDevice
 import com.ifind.app.data.PreferencesManager
+import com.ifind.app.service.FloatingClickerService
+import com.ifind.app.service.IFindAccessibilityService
 import com.ifind.app.ui.theme.AccentAmber
 import com.ifind.app.ui.theme.AccentCoral
 import com.ifind.app.ui.theme.AccentEmerald
@@ -99,24 +110,31 @@ fun DeviceScreen(
     onNavigateToCamera: () -> Unit,
     onNavigateToDiagnostics: () -> Unit
 ) {
+    val context = LocalContext.current
     val connectionState by bleManager.connectionState.collectAsState()
     val connectedDeviceAddress by bleManager.connectedDeviceAddress.collectAsState()
     val connectedDeviceName by bleManager.connectedDeviceName.collectAsState()
     val batteryLevel by bleManager.batteryLevel.collectAsState()
+    val isBatteryReading by bleManager.isBatteryReading.collectAsState()
     val rssi by bleManager.rssi.collectAsState()
     val isRssiUpdating by bleManager.isRssiUpdating.collectAsState()
     val isAlarmActive by bleManager.isAlarmActive.collectAsState()
     val statusMessage by bleManager.statusMessage.collectAsState()
+
+    val isFloatingClickerActive by FloatingClickerService.isFloatingClickerActive.collectAsState()
+    val isAccessibilityEnabled by IFindAccessibilityService.isAccessibilityEnabled.collectAsState()
 
     val friendlyName by preferencesManager.friendlyName.collectAsState()
     val disconnectAlertEnabled by preferencesManager.disconnectAlertEnabled.collectAsState()
 
     var showScanSheet by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showBuzzerTesterSheet by remember { mutableStateOf(false) }
     var newFriendlyNameText by remember { mutableStateOf("") }
 
     val isConnected = connectionState.isConnected
     val isReady = connectionState.isReady
+    val hasOverlayPermission = Settings.canDrawOverlays(context)
 
     Column(
         modifier = Modifier
@@ -213,7 +231,9 @@ fun DeviceScreen(
             // Battery Card
             BatteryCard(
                 batteryLevel = batteryLevel,
+                isReading = isBatteryReading,
                 isConnected = isConnected,
+                onRefresh = { bleManager.readBatteryLevel() },
                 modifier = Modifier.weight(1f)
             )
 
@@ -270,6 +290,11 @@ fun DeviceScreen(
                             )
                         }
                     }
+
+                    // Tester shortcut
+                    IconButton(onClick = { showBuzzerTesterSheet = true }) {
+                        Icon(imageVector = Icons.Rounded.Build, contentDescription = "Buzzer Test Suite", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -300,6 +325,158 @@ fun DeviceScreen(
                         Icon(imageVector = Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(text = "Stop Alarm", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Floating Remote Clicker (Auto-Clicker Shutter) Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BrandCyan.copy(alpha = 0.5f))
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(BrandCyan.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.TouchApp,
+                                contentDescription = null,
+                                tint = BrandCyan,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "Floating Auto-Clicker",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Use iTAG button in ANY camera app",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = isFloatingClickerActive,
+                        onCheckedChange = { active ->
+                            if (active) {
+                                if (!hasOverlayPermission) {
+                                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                    context.startActivity(intent)
+                                } else {
+                                    FloatingClickerService.start(context)
+                                }
+                            } else {
+                                FloatingClickerService.stop(context)
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = BrandCyan
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "A floating target ring will appear on your screen. Drag it over the shutter button of Motorola Camera, Google Camera, Instagram, or Snapchat. Pressing your physical iTAG button triggers an instant click!",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Permission checklist for Auto-Clicker
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Overlay Permission Chip
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                if (!hasOverlayPermission) {
+                                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                    context.startActivity(intent)
+                                }
+                            },
+                        color = if (hasOverlayPermission) AccentEmerald.copy(alpha = 0.12f) else AccentCoral.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (hasOverlayPermission) AccentEmerald.copy(alpha = 0.4f) else AccentCoral.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (hasOverlayPermission) Icons.Rounded.CheckCircle else Icons.Rounded.Layers,
+                                contentDescription = null,
+                                tint = if (hasOverlayPermission) AccentEmerald else AccentCoral,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (hasOverlayPermission) "Overlay: Granted" else "Tap for Overlay",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (hasOverlayPermission) AccentEmerald else AccentCoral
+                            )
+                        }
+                    }
+
+                    // Accessibility Permission Chip
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                if (!isAccessibilityEnabled) {
+                                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                    context.startActivity(intent)
+                                }
+                            },
+                        color = if (isAccessibilityEnabled) AccentEmerald.copy(alpha = 0.12f) else AccentAmber.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isAccessibilityEnabled) AccentEmerald.copy(alpha = 0.4f) else AccentAmber.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Accessibility,
+                                contentDescription = null,
+                                tint = if (isAccessibilityEnabled) AccentEmerald else AccentAmber,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isAccessibilityEnabled) "Accessibility: ON" else "Tap for Accessibility",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isAccessibilityEnabled) AccentEmerald else AccentAmber
+                            )
+                        }
                     }
                 }
             }
@@ -344,12 +521,12 @@ fun DeviceScreen(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = "Remote Selfie Camera",
+                            text = "In-App Selfie Camera",
                             style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (isConnected) "Tracker button armed as shutter" else "Connect tracker to take remote selfies",
+                            text = if (isConnected) "Tracker button armed as remote shutter" else "Connect tracker to take remote selfies",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -417,6 +594,21 @@ fun DeviceScreen(
         Spacer(modifier = Modifier.height(30.dp))
     }
 
+    // Buzzer Command Tester Sheet
+    if (showBuzzerTesterSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showBuzzerTesterSheet = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            BuzzerTesterSheet(
+                bleManager = bleManager,
+                onClose = { showBuzzerTesterSheet = false }
+            )
+        }
+    }
+
     // Scan Modal Bottom Sheet
     if (showScanSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -473,6 +665,79 @@ fun DeviceScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun BuzzerTesterSheet(
+    bleManager: BleManager,
+    onClose: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Buzzer Diagnostic Test Suite", style = MaterialTheme.typography.titleLarge)
+                Text("Test exact buzzer write commands for your iTAG", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onClose) {
+                Icon(imageVector = Icons.Rounded.Close, contentDescription = "Close")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        val tests = listOf(
+            Triple("Immediate Alert 0x02 (High, Response)", byteArrayOf(0x02), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT),
+            Triple("Immediate Alert 0x01 (Mild, Response)", byteArrayOf(0x01), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT),
+            Triple("Immediate Alert 0x02 (No Response)", byteArrayOf(0x02), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE),
+            Triple("Custom FFE2 -> 0x01 (Telink/Lenze)", byteArrayOf(0x01), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT),
+            Triple("Custom FFE2 -> 0x02 (Telink/Lenze)", byteArrayOf(0x02), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT),
+            Triple("Link Loss Alert 0x02 (Link Loss Char)", byteArrayOf(0x02), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        )
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(300.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(tests) { (label, payload, writeType) ->
+                val targetService = if (label.contains("FFE2")) BleConstants.CUSTOM_SERVICE_FFE0_UUID else if (label.contains("Link Loss")) BleConstants.LINK_LOSS_SERVICE_UUID else BleConstants.IMMEDIATE_ALERT_SERVICE_UUID
+                val targetChar = if (label.contains("FFE2")) BleConstants.WRITE_CHAR_FFE2_UUID else if (label.contains("Link Loss")) BleConstants.LINK_LOSS_ALERT_LEVEL_CHAR_UUID else BleConstants.IMMEDIATE_ALERT_LEVEL_CHAR_UUID
+
+                OutlinedButton(
+                    onClick = {
+                        bleManager.testWriteCharacteristic(targetService, targetChar, payload, writeType)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(imageVector = Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(label, fontSize = 13.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = { bleManager.stopAlarm() },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = AccentCoral)
+        ) {
+            Icon(imageVector = Icons.AutoMirrored.Rounded.VolumeOff, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Silence All (Send 0x00)")
+        }
     }
 }
 
@@ -670,7 +935,9 @@ fun ConnectionStatusBadge(connectionState: ConnectionState) {
 @Composable
 fun BatteryCard(
     batteryLevel: Int?,
+    isReading: Boolean,
     isConnected: Boolean,
+    onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -690,17 +957,22 @@ fun BatteryCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Icon(
-                    imageVector = if (batteryLevel != null) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryAlert,
-                    contentDescription = null,
-                    tint = when {
-                        batteryLevel == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                        batteryLevel > 30 -> AccentEmerald
-                        batteryLevel > 15 -> AccentAmber
-                        else -> AccentCoral
-                    },
-                    modifier = Modifier.size(20.dp)
-                )
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = isConnected && !isReading,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    if (isReading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Refresh Battery",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -736,9 +1008,9 @@ fun BatteryCard(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "Not reported yet",
+                    text = if (isReading) "Reading..." else "Tap refresh icon",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }

@@ -199,6 +199,9 @@ fun DiagnosticsScreen(
                 diagnosticChars = diagnosticChars,
                 onReadChar = { item ->
                     bleManager.readDiagnosticCharacteristic(item.serviceUuid, item.characteristicUuid)
+                },
+                onWriteChar = { item, payload, writeType ->
+                    bleManager.testWriteCharacteristic(item.serviceUuid, item.characteristicUuid, payload, writeType)
                 }
             )
         }
@@ -445,7 +448,8 @@ fun ButtonVerificationView(
 @Composable
 fun GattInspectorView(
     diagnosticChars: List<com.ifind.app.ble.model.DiagnosticCharacteristic>,
-    onReadChar: (com.ifind.app.ble.model.DiagnosticCharacteristic) -> Unit
+    onReadChar: (com.ifind.app.ble.model.DiagnosticCharacteristic) -> Unit,
+    onWriteChar: (com.ifind.app.ble.model.DiagnosticCharacteristic, ByteArray, Int) -> Unit
 ) {
     if (diagnosticChars.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -461,7 +465,7 @@ fun GattInspectorView(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(diagnosticChars, key = { it.characteristicUuid.toString() }) { item ->
+            items(diagnosticChars, key = { "${it.serviceUuid}_${it.characteristicUuid}" }) { item ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -488,17 +492,37 @@ fun GattInspectorView(
                                 )
                             }
 
-                            if (item.readable) {
-                                Button(
-                                    onClick = { onReadChar(item) },
-                                    enabled = !item.isReading,
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                                ) {
-                                    if (item.isReading) {
-                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                    } else {
-                                        Text("Read", fontSize = 12.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (item.readable) {
+                                    Button(
+                                        onClick = { onReadChar(item) },
+                                        enabled = !item.isReading,
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                    ) {
+                                        if (item.isReading) {
+                                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Text("Read", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                                if (item.writable) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            onWriteChar(item, byteArrayOf(0x01), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                                        },
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Write 0x01", fontSize = 11.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            onWriteChar(item, byteArrayOf(0x02), android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                                        },
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Write 0x02", fontSize = 11.sp)
                                     }
                                 }
                             }
