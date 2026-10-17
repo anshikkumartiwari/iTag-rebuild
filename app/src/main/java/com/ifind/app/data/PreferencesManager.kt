@@ -26,6 +26,9 @@ class PreferencesManager(context: Context) {
     private val _savedDeviceAddress = MutableStateFlow(prefs.getString(KEY_SAVED_DEVICE_ADDR, null))
     val savedDeviceAddress: StateFlow<String?> = _savedDeviceAddress.asStateFlow()
 
+    private val _savedDeviceName = MutableStateFlow(prefs.getString(KEY_SAVED_DEVICE_NAME, null))
+    val savedDeviceName: StateFlow<String?> = _savedDeviceName.asStateFlow()
+
     private val _disconnectAlertEnabled = MutableStateFlow(prefs.getBoolean(KEY_DISCONNECT_ALERT, true))
     val disconnectAlertEnabled: StateFlow<Boolean> = _disconnectAlertEnabled.asStateFlow()
 
@@ -70,6 +73,24 @@ class PreferencesManager(context: Context) {
     fun setSavedDeviceAddress(address: String?) {
         prefs.edit().putString(KEY_SAVED_DEVICE_ADDR, address).apply()
         _savedDeviceAddress.value = address
+    }
+
+    fun saveDevice(address: String, name: String?) {
+        prefs.edit()
+            .putString(KEY_SAVED_DEVICE_ADDR, address)
+            .putString(KEY_SAVED_DEVICE_NAME, name)
+            .apply()
+        _savedDeviceAddress.value = address
+        _savedDeviceName.value = name
+    }
+
+    fun forgetSavedDevice() {
+        prefs.edit()
+            .remove(KEY_SAVED_DEVICE_ADDR)
+            .remove(KEY_SAVED_DEVICE_NAME)
+            .apply()
+        _savedDeviceAddress.value = null
+        _savedDeviceName.value = null
     }
 
     fun setDisconnectAlertEnabled(enabled: Boolean) {
@@ -200,6 +221,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_THEME = "app_theme"
         private const val KEY_FRIENDLY_NAME = "device_friendly_name"
         private const val KEY_SAVED_DEVICE_ADDR = "saved_device_addr"
+        private const val KEY_SAVED_DEVICE_NAME = "saved_device_name"
         private const val KEY_DISCONNECT_ALERT = "disconnect_alert_enabled"
         private const val KEY_FIND_MY_PHONE = "find_my_phone_enabled"
         private const val KEY_CAMERA_COUNTDOWN = "camera_countdown_sec"

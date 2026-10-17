@@ -439,6 +439,15 @@ class BleManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
+    fun autoConnect(address: String) {
+        if (_connectionState.value.isConnected || _connectionState.value == ConnectionState.Connecting) {
+            return
+        }
+        Log.i(TAG, "Starting auto-connect to saved tracker: $address")
+        connectByAddress(address)
+    }
+
+    @SuppressLint("MissingPermission")
     fun disconnect() {
         bluetoothGatt?.let { gatt ->
             try {

@@ -45,7 +45,11 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
-        // Permissions updated
+        val app = application as? IFindApp ?: return@registerForActivityResult
+        val savedAddr = app.preferencesManager.savedDeviceAddress.value
+        if (!savedAddr.isNullOrEmpty() && !app.bleManager.connectionState.value.isConnected) {
+            app.bleManager.autoConnect(savedAddr)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,6 +61,12 @@ class MainActivity : ComponentActivity() {
         val bleScanner = app.bleScanner
         val preferencesManager = app.preferencesManager
         val locationTracker = app.locationTracker
+
+        // Auto-connect to saved tracker immediately on launch
+        val savedAddr = preferencesManager.savedDeviceAddress.value
+        if (!savedAddr.isNullOrEmpty() && !bleManager.connectionState.value.isConnected) {
+            bleManager.autoConnect(savedAddr)
+        }
 
         setContent {
             val appTheme by preferencesManager.theme.collectAsState()
@@ -128,6 +138,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val app = application as? IFindApp ?: return
+        val savedAddr = app.preferencesManager.savedDeviceAddress.value
+        if (!savedAddr.isNullOrEmpty() && !app.bleManager.connectionState.value.isConnected) {
+            app.bleManager.autoConnect(savedAddr)
         }
     }
 

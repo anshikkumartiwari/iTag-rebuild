@@ -51,6 +51,8 @@ import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +61,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -126,6 +129,8 @@ fun DeviceScreen(
 
     val friendlyName by preferencesManager.friendlyName.collectAsState()
     val disconnectAlertEnabled by preferencesManager.disconnectAlertEnabled.collectAsState()
+    val savedDeviceAddress by preferencesManager.savedDeviceAddress.collectAsState()
+    val savedDeviceName by preferencesManager.savedDeviceName.collectAsState()
 
     var showScanSheet by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -183,13 +188,94 @@ fun DeviceScreen(
             connectionState = connectionState,
             displayName = friendlyName ?: connectedDeviceName ?: "iTAG Tracker",
             macAddress = connectedDeviceAddress,
+            isSavedDevice = (savedDeviceAddress != null && savedDeviceAddress == connectedDeviceAddress),
             onRenameClicked = {
                 newFriendlyNameText = friendlyName ?: connectedDeviceName ?: ""
                 showRenameDialog = true
             },
             onConnectClicked = { showScanSheet = true },
-            onDisconnectClicked = { bleManager.disconnect() }
+            onDisconnectClicked = { bleManager.disconnect() },
+            onToggleSaveDevice = {
+                val addr = connectedDeviceAddress
+                if (savedDeviceAddress == addr && addr != null) {
+                    preferencesManager.forgetSavedDevice()
+                } else if (addr != null) {
+                    preferencesManager.saveDevice(addr, friendlyName ?: connectedDeviceName)
+                }
+            }
         )
+
+        // Saved Tracker Auto-Connect Banner (when disconnected)
+        if (!isConnected && savedDeviceAddress != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Star,
+                            contentDescription = null,
+                            tint = com.ifind.app.ui.theme.AccentAmber,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Saved: ${savedDeviceName ?: savedDeviceAddress}",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (connectionState == ConnectionState.Connecting) "Searching & connecting..." else "Auto-connects when device is in range",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (connectionState != ConnectionState.Connecting) {
+                            Button(
+                                onClick = { savedDeviceAddress?.let { bleManager.autoConnect(it) } },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("Connect", style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(
+                            onClick = { preferencesManager.forgetSavedDevice() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Forget Device",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -620,8 +706,9 @@ fun DeviceScreen(
         ) {
             ScanDevicesSheet(
                 bleScanner = bleScanner,
+                savedDeviceAddress = savedDeviceAddress,
                 onDeviceSelected = { device ->
-                    preferencesManager.setSavedDeviceAddress(device.address)
+                    preferencesManager.saveDevice(device.address, device.name)
                     bleManager.connect(device.device)
                     bleScanner.stopScan()
                     showScanSheet = false
@@ -744,9 +831,11 @@ fun DeviceHeroCard(
     connectionState: ConnectionState,
     displayName: String,
     macAddress: String?,
+    isSavedDevice: Boolean = false,
     onRenameClicked: () -> Unit,
     onConnectClicked: () -> Unit,
-    onDisconnectClicked: () -> Unit
+    onDisconnectClicked: () -> Unit,
+    onToggleSaveDevice: () -> Unit = {}
 ) {
     val isConnected = connectionState.isConnected
     val isReady = connectionState.isReady
@@ -840,6 +929,46 @@ fun DeviceHeroCard(
                         fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.labelLarge
                     )
+                }
+
+                if (macAddress != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (isSavedDevice) {
+                        FilledTonalButton(
+                            onClick = onToggleSaveDevice,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(0.85f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Star,
+                                contentDescription = null,
+                                tint = com.ifind.app.ui.theme.AccentAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Saved for Auto-Connect",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onToggleSaveDevice,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(0.85f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.StarBorder,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Save Device (Auto-Connect)",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
                 }
             } else {
                 Button(
@@ -1071,6 +1200,7 @@ fun SignalCard(
 @Composable
 fun ScanDevicesSheet(
     bleScanner: BleScanner,
+    savedDeviceAddress: String? = null,
     onDeviceSelected: (DiscoveredDevice) -> Unit,
     onClose: () -> Unit
 ) {
@@ -1171,6 +1301,22 @@ fun ScanDevicesSheet(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
+                            }
+                            if (matchedTag.address == savedDeviceAddress) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = com.ifind.app.ui.theme.AccentAmber.copy(alpha = 0.2f),
+                                    contentColor = com.ifind.app.ui.theme.AccentAmber,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, com.ifind.app.ui.theme.AccentAmber)
+                                ) {
+                                    Text(
+                                        text = "★ SAVED",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
                         }
                         Text(
