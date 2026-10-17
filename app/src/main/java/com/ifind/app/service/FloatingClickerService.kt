@@ -584,23 +584,30 @@ class FloatingClickerService : Service() {
         }
     }
 
-    private fun executeWithOverlayBypass(scrollMode: Boolean = false, action: (targetX: Float, targetY: Float) -> Unit) {
+    private fun executeWithOverlayBypass(
+        scrollMode: Boolean = false,
+        isDoubleTap: Boolean = false,
+        action: (targetX: Float, targetY: Float) -> Unit
+    ) {
         val root = floatingRootView ?: return
         val wm = windowManager ?: return
         val p = params ?: return
 
+        val density = resources.displayMetrics.density
+        val fallbackX = p.x + (44f * density)
+        val fallbackY = p.y + (44f * density)
+
         val location = IntArray(2)
         centerDotView?.getLocationOnScreen(location)
-        val density = resources.displayMetrics.density
-        val targetX = if (location[0] > 0) {
+        val targetX = if (location[0] > 0 && (centerDotView?.width ?: 0) > 0) {
             location[0] + (centerDotView?.width ?: 0) / 2f
         } else {
-            p.x + (44 * density)
+            fallbackX
         }
-        val targetY = if (location[1] > 0) {
+        val targetY = if (location[1] > 0 && (centerDotView?.height ?: 0) > 0) {
             location[1] + (centerDotView?.height ?: 0) / 2f
         } else {
-            p.y + (44 * density)
+            fallbackY
         }
 
         if (!IFindAccessibilityService.isRunning()) {
@@ -630,7 +637,7 @@ class FloatingClickerService : Service() {
             action(targetX, targetY)
 
             // 3. Restore touchable flag after gesture has executed
-            val restoreDelay = if (scrollMode) 320L else 180L
+            val restoreDelay = if (scrollMode) 320L else if (isDoubleTap) 320L else 180L
             delay(restoreDelay)
             p.flags = originalFlags
             try {
@@ -689,7 +696,7 @@ class FloatingClickerService : Service() {
                                 Log.i(TAG, "Double press: executing Double-Tap Like")
                                 vibratePhone()
                                 animateClickFeedback(root)
-                                executeWithOverlayBypass(scrollMode = false) { targetX, targetY ->
+                                executeWithOverlayBypass(scrollMode = false, isDoubleTap = true) { targetX, targetY ->
                                     val dispatched = IFindAccessibilityService.doubleClickAt(targetX, targetY)
                                     Log.d(TAG, "Floater doubleClickAt ($targetX, $targetY) dispatched: $dispatched")
                                 }

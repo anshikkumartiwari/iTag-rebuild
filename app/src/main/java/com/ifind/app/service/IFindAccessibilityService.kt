@@ -53,13 +53,12 @@ class IFindAccessibilityService : AccessibilityService() {
             val screenW = dm.widthPixels.toFloat()
             val screenH = dm.heightPixels.toFloat()
 
-            // Clamp coordinates safely within screen boundaries (prevent negative or out of bounds coordinates)
+            // Clamp coordinates safely within screen boundaries
             val safeX = x.coerceIn(10f, (screenW - 10f).coerceAtLeast(10f))
             val safeY = y.coerceIn(10f, (screenH - 10f).coerceAtLeast(10f))
 
             val clickPath = Path().apply {
                 moveTo(safeX, safeY)
-                lineTo(safeX, safeY)
             }
 
             val stroke = GestureDescription.StrokeDescription(clickPath, 0L, durationMs.coerceIn(20L, 200L))
@@ -86,51 +85,11 @@ class IFindAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun doubleClick(x: Float, y: Float, tapDurationMs: Long = 45L, gapMs: Long = 80L, onComplete: (() -> Unit)? = null): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            return false
-        }
-
-        return try {
-            val dm = resources.displayMetrics
-            val screenW = dm.widthPixels.toFloat()
-            val screenH = dm.heightPixels.toFloat()
-
-            val safeX = x.coerceIn(10f, (screenW - 10f).coerceAtLeast(10f))
-            val safeY = y.coerceIn(10f, (screenH - 10f).coerceAtLeast(10f))
-
-            val path1 = Path().apply {
-                moveTo(safeX, safeY)
-                lineTo(safeX, safeY)
-            }
-            val path2 = Path().apply {
-                moveTo(safeX, safeY)
-                lineTo(safeX, safeY)
-            }
-
-            val stroke1 = GestureDescription.StrokeDescription(path1, 0L, tapDurationMs)
-            val stroke2 = GestureDescription.StrokeDescription(path2, tapDurationMs + gapMs, tapDurationMs)
-
-            val gesture = GestureDescription.Builder()
-                .addStroke(stroke1)
-                .addStroke(stroke2)
-                .build()
-
-            val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    Log.i(TAG, "Double tap completed at ($safeX, $safeY)")
-                    onComplete?.invoke()
-                }
-
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    Log.w(TAG, "Double tap cancelled at ($safeX, $safeY)")
-                }
-            }, null)
-
-            dispatched
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to dispatch double click gesture safely: ${t.message}", t)
-            false
+    fun doubleClick(x: Float, y: Float, tapDurationMs: Long = 50L, gapMs: Long = 100L, onComplete: (() -> Unit)? = null): Boolean {
+        return click(x, y, tapDurationMs) {
+            mainHandler.postDelayed({
+                click(x, y, tapDurationMs, onComplete)
+            }, gapMs)
         }
     }
 
