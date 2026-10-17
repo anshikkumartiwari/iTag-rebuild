@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.2"
+        android:scaleY="1.2"
+        android:translateX="-10.8"
+        android:translateY="-10.8">
+        <!-- Outer beacon ring -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#48CAE4"
+            android:strokeWidth="3"
+            android:pathData="M 34,54 A 20,20 0 0 1 74,54" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#0077B6"
+            android:strokeWidth="3"
+            android:pathData="M 24,54 A 30,30 0 0 1 84,54" />
+        <!-- Center tracker pin / tag -->
+        <path
+            android:fillColor="#00B4D8"
+            android:pathData="M 54,34 C 47.4,34 42,39.4 42,46 C 42,55 54,68 54,68 C 54,68 66,55 66,46 C 66,39.4 60.6,34 54,34 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M 54,42 A 4,4 0 1 0 54,50 A 4,4 0 1 0 54,42 Z" />
+    </group>
+</vector>

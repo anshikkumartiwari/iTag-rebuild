@@ -1,0 +1,62 @@
+<server-configuration name="iTAG - copy">
+   <service uuid="0000180f-0000-1000-8000-00805f9b34fb">
+      <characteristic uuid="00002a19-0000-1000-8000-00805f9b34fb">
+         <descriptor uuid="00002908-0000-1000-8000-00805f9b34fb"/>
+         <descriptor configure="CCCD"/>
+         <permission name="READ"/>
+         <property name="READ"/>
+         <property name="NOTIFY"/>
+      </characteristic>
+   </service>
+   <service uuid="00001803-0000-1000-8000-00805f9b34fb">
+      <characteristic uuid="00002a06-0000-1000-8000-00805f9b34fb">
+         <permission name="READ"/>
+         <permission name="WRITE"/>
+         <property name="READ"/>
+         <property name="WRITE"/>
+      </characteristic>
+   </service>
+   <service uuid="00001802-0000-1000-8000-00805f9b34fb">
+      <characteristic uuid="00002a06-0000-1000-8000-00805f9b34fb">
+         <permission name="WRITE"/>
+         <property name="WRITE"/>
+         <property name="WRITE_WITHOUT_RESPONSE"/>
+      </characteristic>
+   </service>
+   <service uuid="0000ffe0-0000-1000-8000-00805f9b34fb">
+      <characteristic uuid="0000ffe1-0000-1000-8000-00805f9b34fb" value="01">
+         <descriptor configure="CCCD"/>
+         <permission name="READ"/>
+         <property name="READ"/>
+         <property name="NOTIFY"/>
+      </characteristic>
+      <characteristic uuid="0000ffe2-0000-1000-8000-00805f9b34fb">
+         <permission name="WRITE"/>
+         <property name="WRITE"/>
+      </characteristic>
+      <characteristic uuid="0000ffe3-0000-1000-8000-00805f9b34fb">
+         <permission name="READ"/>
+         <property name="READ"/>
+      </characteristic>
+      <characteristic uuid="0000ffe4-0000-1000-8000-00805f9b34fb">
+         <permission name="READ"/>
+         <permission name="WRITE"/>
+         <property name="READ"/>
+         <property name="WRITE"/>
+      </characteristic>
+      <characteristic uuid="0000ffe5-0000-1000-8000-00805f9b34fb">
+         <permission name="WRITE"/>
+         <property name="WRITE"/>
+      </characteristic>
+      <characteristic uuid="0000ffe6-0000-1000-8000-00805f9b34fb">
+         <permission name="READ"/>
+         <property name="READ"/>
+      </characteristic>
+      <characteristic uuid="0000ffe7-0000-1000-8000-00805f9b34fb">
+         <permission name="READ"/>
+         <permission name="WRITE"/>
+         <property name="READ"/>
+         <property name="WRITE"/>
+      </characteristic>
+   </service>
+</server-configuration>

@@ -1,0 +1,35 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.idea/
+*.hprof
+*.apk
+*.aab
+*.ap_
+output.json
+
+# Android Studio / IntelliJ
+.idea/
+*.ipr
+*.iws
+
+# Gradle build cache & wrapper binaries if temporary
+.gradle/
+build/
+app/build/
+
+# OS files
+Thumbs.db
+Desktop.ini
