@@ -289,7 +289,7 @@ class FloatingClickerService : Service() {
         }
 
         val scrollModeBtn = TextView(this).apply {
-            text = "Scroll Reel"
+            text = "Scroll"
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
@@ -344,7 +344,7 @@ class FloatingClickerService : Service() {
         }
 
         val distanceTitle = TextView(this).apply {
-            text = "Reel Swipe Distance (Default: 550 dp):"
+            text = "Scroll Distance (Default: 550 dp):"
             setTextColor(0xFF8E8E93.toInt())
             textSize = 11f
         }
@@ -413,31 +413,20 @@ class FloatingClickerService : Service() {
         distanceContainer.addView(distanceControls)
         settingsPanel.addView(distanceContainer)
 
-        // Double Tap Like Toggle
+        // Double Click = Double Tap Toggle
         val doubleTapRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(10), 0, dp(4))
         }
 
-        val doubleTapLabelCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
         val doubleTapTitle = TextView(this).apply {
-            text = "Double-Press = Like ❤"
+            text = "Double click = double tap"
             setTextColor(Color.WHITE)
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val doubleTapSub = TextView(this).apply {
-            text = "Disables Find Phone"
-            setTextColor(0xFF8E8E93.toInt())
-            textSize = 10f
-        }
-        doubleTapLabelCol.addView(doubleTapTitle)
-        doubleTapLabelCol.addView(doubleTapSub)
 
         val doubleTapSwitch = Switch(this).apply {
             isChecked = prefs.floaterDoubleTapLike.value
@@ -445,7 +434,7 @@ class FloatingClickerService : Service() {
                 prefs.setFloaterDoubleTapLike(isChecked)
             }
         }
-        doubleTapRow.addView(doubleTapLabelCol)
+        doubleTapRow.addView(doubleTapTitle)
         doubleTapRow.addView(doubleTapSwitch)
         settingsPanel.addView(doubleTapRow)
 
