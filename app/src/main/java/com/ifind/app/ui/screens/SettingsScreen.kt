@@ -305,7 +305,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "Version 1.0.0 • Clean Native Jetpack Compose Architecture\nEngineered to replace iSearching with reliable BLE GATT handling and CameraX Remote Shutter.",
+                text = "Version 1.1.0 • Clean Native Jetpack Compose Architecture\nEngineered to replace iSearching with reliable BLE GATT handling and CameraX Remote Shutter.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
