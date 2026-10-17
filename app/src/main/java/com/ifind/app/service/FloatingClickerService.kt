@@ -123,14 +123,18 @@ class FloatingClickerService : Service() {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID_FLOATER,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID_FLOATER, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID_FLOATER,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID_FLOATER, notification)
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed startForeground for floater: ${e.message}", e)
         }
     }
 
@@ -590,42 +594,46 @@ class FloatingClickerService : Service() {
                 val targetScreenX = p.x + (44 * density)
                 val targetScreenY = p.y + (44 * density)
 
-                when (event) {
-                    is ButtonEvent.SinglePress -> {
-                        val mode = prefs.floaterActionMode.value
-                        vibratePhone()
-
-                        if (mode == "scroll") {
-                            // Vertical scroll: swipe up to advance reel
-                            val distanceDp = prefs.floaterScrollDistanceDp.value
-                            val distancePx = distanceDp * density
-
-                            root.animate()
-                                .translationY(-30f)
-                                .setDuration(120)
-                                .withEndAction {
-                                    root.animate().translationY(0f).setDuration(120).start()
-                                }
-                                .start()
-
-                            IFindAccessibilityService.scrollVerticalAt(targetScreenX, targetScreenY, distancePx)
-                        } else {
-                            // Single tap
-                            animateClickFeedback(root)
-                            IFindAccessibilityService.clickAt(targetScreenX, targetScreenY)
-                        }
-                    }
-
-                    is ButtonEvent.DoublePress -> {
-                        if (prefs.floaterDoubleTapLike.value) {
-                            Log.i(TAG, "Double press: dispatching Double-Tap Like gesture on screen")
+                try {
+                    when (event) {
+                        is ButtonEvent.SinglePress -> {
+                            val mode = prefs.floaterActionMode.value
                             vibratePhone()
-                            animateClickFeedback(root)
-                            IFindAccessibilityService.doubleClickAt(targetScreenX, targetScreenY)
-                        }
-                    }
 
-                    else -> Unit
+                            if (mode == "scroll") {
+                                // Vertical scroll: swipe up to advance reel
+                                val distanceDp = prefs.floaterScrollDistanceDp.value
+                                val distancePx = distanceDp * density
+
+                                root.animate()
+                                    .translationY(-30f)
+                                    .setDuration(120)
+                                    .withEndAction {
+                                        root.animate().translationY(0f).setDuration(120).start()
+                                    }
+                                    .start()
+
+                                IFindAccessibilityService.scrollVerticalAt(targetScreenX, targetScreenY, distancePx)
+                            } else {
+                                // Single tap
+                                animateClickFeedback(root)
+                                IFindAccessibilityService.clickAt(targetScreenX, targetScreenY)
+                            }
+                        }
+
+                        is ButtonEvent.DoublePress -> {
+                            if (prefs.floaterDoubleTapLike.value) {
+                                Log.i(TAG, "Double press: dispatching Double-Tap Like gesture on screen")
+                                vibratePhone()
+                                animateClickFeedback(root)
+                                IFindAccessibilityService.doubleClickAt(targetScreenX, targetScreenY)
+                            }
+                        }
+
+                        else -> Unit
+                    }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Error handling floater gesture event: ${t.message}", t)
                 }
             }
         }
@@ -689,10 +697,17 @@ class FloatingClickerService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, FloatingClickerService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Failed to startForegroundService, fallback to startService", t)
+                try {
+                    context.startService(intent)
+                } catch (_: Throwable) {}
             }
         }
 
