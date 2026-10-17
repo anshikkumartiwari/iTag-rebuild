@@ -1131,6 +1131,75 @@ fun ScanDevicesSheet(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        val matchedTag = devices.firstOrNull { it.isLikelyITag }
+        val otherDevices = devices.filter { it != matchedTag }
+
+        // Pinned Hero Card for matched iTAG tracker (Never requires scrolling!)
+        if (matchedTag != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onDeviceSelected(matchedTag) },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = matchedTag.displayName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                contentColor = Color.White
+                            ) {
+                                Text(
+                                    text = "PINNED MATCH",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = matchedTag.address,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "${matchedTag.rssi} dBm",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = { onDeviceSelected(matchedTag) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("Connect", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
         if (devices.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -1145,55 +1214,45 @@ fun ScanDevicesSheet(
                     textAlign = TextAlign.Center
                 )
             }
-        } else {
+        } else if (otherDevices.isNotEmpty()) {
+            if (matchedTag != null) {
+                Text(
+                    text = "Other Nearby Devices (${otherDevices.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(340.dp),
+                    .height(if (matchedTag != null) 240.dp else 340.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(devices, key = { it.address }) { dev ->
+                items(otherDevices, key = { it.address }) { dev ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onDeviceSelected(dev) },
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (dev.isLikelyITag) BrandCyan.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        border = if (dev.isLikelyITag) androidx.compose.foundation.BorderStroke(1.5.dp, BrandCyan.copy(alpha = 0.5f)) else null
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = dev.displayName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (dev.isLikelyITag) {
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = BrandCyan,
-                                            contentColor = Color.Black
-                                        ) {
-                                            Text(
-                                                text = "iTAG MATCH",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
+                                Text(
+                                    text = dev.displayName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                                 Text(
                                     text = dev.address,
                                     style = MaterialTheme.typography.labelSmall,
@@ -1211,9 +1270,9 @@ fun ScanDevicesSheet(
                                 Button(
                                     onClick = { onDeviceSelected(dev) },
                                     shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface)
                                 ) {
-                                    Text("Connect", fontSize = 12.sp)
+                                    Text("Connect", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }

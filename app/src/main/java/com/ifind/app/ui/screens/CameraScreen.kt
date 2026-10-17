@@ -176,6 +176,41 @@ fun CameraScreen(
         }
     }
 
+    var cameraProvider: ProcessCameraProvider? by remember { mutableStateOf(null) }
+    var previewView: PreviewView? by remember { mutableStateOf(null) }
+
+    // Rebind camera whenever lens facing (front/back) changes
+    LaunchedEffect(lensFacing, cameraProvider, previewView) {
+        val provider = cameraProvider ?: return@LaunchedEffect
+        val view = previewView ?: return@LaunchedEffect
+
+        try {
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(view.surfaceProvider)
+            }
+
+            val capture = ImageCapture.Builder()
+                .setFlashMode(flashMode)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+            imageCapture = capture
+
+            val cameraSelector = CameraSelector.Builder()
+                .requireLensFacing(lensFacing)
+                .build()
+
+            provider.unbindAll()
+            cameraControl = provider.bindToLifecycle(
+                lifecycleOwner,
+                cameraSelector,
+                preview,
+                capture
+            )
+        } catch (e: Exception) {
+            Toast.makeText(context, "Failed to switch camera: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -185,44 +220,24 @@ fun CameraScreen(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                val previewView = PreviewView(ctx).apply {
+                val view = PreviewView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                 }
+                previewView = view
 
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-                    val preview = Preview.Builder().build().also {
-                        it.setSurfaceProvider(previewView.surfaceProvider)
-                    }
-
-                    val capture = ImageCapture.Builder()
-                        .setFlashMode(flashMode)
-                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                        .build()
-                    imageCapture = capture
-
-                    val cameraSelector = CameraSelector.Builder()
-                        .requireLensFacing(lensFacing)
-                        .build()
-
                     try {
-                        cameraProvider.unbindAll()
-                        cameraControl = cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            cameraSelector,
-                            preview,
-                            capture
-                        )
+                        cameraProvider = cameraProviderFuture.get()
                     } catch (e: Exception) {
-                        Toast.makeText(ctx, "Failed to initialize camera: ${e.message}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(ctx, "Failed to get camera provider: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }, ContextCompat.getMainExecutor(ctx))
 
-                previewView
+                view
             },
             update = {
                 imageCapture?.flashMode = flashMode
