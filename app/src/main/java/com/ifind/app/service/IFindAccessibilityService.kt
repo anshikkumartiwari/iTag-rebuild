@@ -42,7 +42,7 @@ class IFindAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    fun click(x: Float, y: Float, durationMs: Long = 80L, onComplete: (() -> Unit)? = null): Boolean {
+    fun click(x: Float, y: Float, durationMs: Long = 50L, onComplete: (() -> Unit)? = null): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             Log.w(TAG, "dispatchGesture requires Android N (API 24)+")
             return false
@@ -59,17 +59,17 @@ class IFindAccessibilityService : AccessibilityService() {
 
             val clickPath = Path().apply {
                 moveTo(safeX, safeY)
-                lineTo(safeX + 1f, safeY + 1f)
+                lineTo(safeX, safeY)
             }
 
-            val stroke = GestureDescription.StrokeDescription(clickPath, 0, durationMs.coerceIn(20L, 500L))
+            val stroke = GestureDescription.StrokeDescription(clickPath, 0L, durationMs.coerceIn(20L, 200L))
             val gesture = GestureDescription.Builder()
                 .addStroke(stroke)
                 .build()
 
             val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    Log.d(TAG, "Tap completed at ($safeX, $safeY)")
+                    Log.i(TAG, "Tap completed at ($safeX, $safeY)")
                     onComplete?.invoke()
                 }
 
@@ -78,7 +78,7 @@ class IFindAccessibilityService : AccessibilityService() {
                 }
             }, null)
 
-            Log.d(TAG, "dispatchGesture tap invoked at ($safeX, $safeY): dispatched=$dispatched")
+            Log.i(TAG, "dispatchGesture tap invoked at ($safeX, $safeY): dispatched=$dispatched")
             dispatched
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to dispatch click gesture safely: ${t.message}", t)
@@ -86,7 +86,7 @@ class IFindAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun doubleClick(x: Float, y: Float, tapDurationMs: Long = 60L, gapMs: Long = 100L, onComplete: (() -> Unit)? = null): Boolean {
+    fun doubleClick(x: Float, y: Float, tapDurationMs: Long = 45L, gapMs: Long = 80L, onComplete: (() -> Unit)? = null): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             return false
         }
@@ -101,14 +101,14 @@ class IFindAccessibilityService : AccessibilityService() {
 
             val path1 = Path().apply {
                 moveTo(safeX, safeY)
-                lineTo(safeX + 1f, safeY + 1f)
+                lineTo(safeX, safeY)
             }
             val path2 = Path().apply {
                 moveTo(safeX, safeY)
-                lineTo(safeX + 1f, safeY + 1f)
+                lineTo(safeX, safeY)
             }
 
-            val stroke1 = GestureDescription.StrokeDescription(path1, 0, tapDurationMs)
+            val stroke1 = GestureDescription.StrokeDescription(path1, 0L, tapDurationMs)
             val stroke2 = GestureDescription.StrokeDescription(path2, tapDurationMs + gapMs, tapDurationMs)
 
             val gesture = GestureDescription.Builder()
@@ -118,7 +118,7 @@ class IFindAccessibilityService : AccessibilityService() {
 
             val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    Log.d(TAG, "Double tap completed at ($safeX, $safeY)")
+                    Log.i(TAG, "Double tap completed at ($safeX, $safeY)")
                     onComplete?.invoke()
                 }
 
@@ -134,7 +134,7 @@ class IFindAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun scrollVertical(startX: Float, startY: Float, distancePx: Float, durationMs: Long = 280L, onComplete: (() -> Unit)? = null): Boolean {
+    fun scrollVertical(startX: Float, startY: Float, distancePx: Float, durationMs: Long = 260L, onComplete: (() -> Unit)? = null): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             Log.w(TAG, "dispatchGesture requires Android N (API 24)+")
             return false
@@ -145,27 +145,27 @@ class IFindAccessibilityService : AccessibilityService() {
             val screenW = dm.widthPixels.toFloat()
             val screenH = dm.heightPixels.toFloat()
 
-            // Safe start coordinate in middle-lower third
-            val safeStartX = startX.coerceIn(10f, (screenW - 10f).coerceAtLeast(10f))
-            val safeStartY = startY.coerceIn(screenH * 0.40f, screenH * 0.85f)
+            // Safe horizontal swipe coordinate: keep within central 50% of screen to avoid system back gesture zones!
+            val safeStartX = startX.coerceIn(screenW * 0.25f, screenW * 0.75f)
+            val safeStartY = startY.coerceIn(screenH * 0.50f, screenH * 0.85f)
 
-            // Clamp endY to be strictly positive and strictly higher on the screen
-            val targetDistance = distancePx.coerceIn(200f, screenH * 0.70f)
-            val safeEndY = (safeStartY - targetDistance).coerceIn(screenH * 0.10f, safeStartY - 80f)
+            // Clamp endY to be strictly positive and strictly higher on the screen (swipe up to advance reel)
+            val targetDistance = distancePx.coerceIn(250f, screenH * 0.75f)
+            val safeEndY = (safeStartY - targetDistance).coerceIn(screenH * 0.10f, safeStartY - 100f)
 
             val scrollPath = Path().apply {
                 moveTo(safeStartX, safeStartY)
                 lineTo(safeStartX, safeEndY)
             }
 
-            val stroke = GestureDescription.StrokeDescription(scrollPath, 0, durationMs.coerceIn(150L, 600L))
+            val stroke = GestureDescription.StrokeDescription(scrollPath, 0L, durationMs.coerceIn(180L, 400L))
             val gesture = GestureDescription.Builder()
                 .addStroke(stroke)
                 .build()
 
             val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    Log.d(TAG, "Scroll gesture completed: from $safeStartY to $safeEndY")
+                    Log.i(TAG, "Scroll gesture completed: from ($safeStartX, $safeStartY) to ($safeStartX, $safeEndY)")
                     onComplete?.invoke()
                 }
 
@@ -174,7 +174,7 @@ class IFindAccessibilityService : AccessibilityService() {
                 }
             }, null)
 
-            Log.d(TAG, "dispatchGesture scroll from $safeStartY to $safeEndY: dispatched=$dispatched")
+            Log.i(TAG, "dispatchGesture scroll from $safeStartY to $safeEndY: dispatched=$dispatched")
             dispatched
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to dispatch scroll gesture safely: ${t.message}", t)

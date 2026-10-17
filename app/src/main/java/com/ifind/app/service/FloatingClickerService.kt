@@ -36,6 +36,7 @@ import com.ifind.app.ble.model.ButtonEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,6 +52,7 @@ class FloatingClickerService : Service() {
     private var windowManager: WindowManager? = null
     private var floatingRootView: View? = null
     private var params: WindowManager.LayoutParams? = null
+    private var centerDotView: View? = null
 
     private var initialX = 0
     private var initialY = 0
@@ -211,6 +213,8 @@ class FloatingClickerService : Service() {
             }
             background = drawable
         }
+
+        centerDotView = centerDot
 
         targetFrame.addView(outerRing)
         targetFrame.addView(hLine)
@@ -580,6 +584,61 @@ class FloatingClickerService : Service() {
         }
     }
 
+    private fun executeWithOverlayBypass(scrollMode: Boolean = false, action: (targetX: Float, targetY: Float) -> Unit) {
+        val root = floatingRootView ?: return
+        val wm = windowManager ?: return
+        val p = params ?: return
+
+        val location = IntArray(2)
+        centerDotView?.getLocationOnScreen(location)
+        val density = resources.displayMetrics.density
+        val targetX = if (location[0] > 0) {
+            location[0] + (centerDotView?.width ?: 0) / 2f
+        } else {
+            p.x + (44 * density)
+        }
+        val targetY = if (location[1] > 0) {
+            location[1] + (centerDotView?.height ?: 0) / 2f
+        } else {
+            p.y + (44 * density)
+        }
+
+        if (!IFindAccessibilityService.isRunning()) {
+            Toast.makeText(
+                this@FloatingClickerService,
+                "Please turn ON iFind in Accessibility settings",
+                Toast.LENGTH_SHORT
+            ).show()
+            Log.w(TAG, "Cannot dispatch gesture: IFindAccessibilityService is not connected")
+            return
+        }
+
+        // 1. Set FLAG_NOT_TOUCHABLE on the floating window
+        // Crucial: This ensures synthetic accessibility touches pass through directly
+        // to the underlying app without being intercepted by targetFrame!
+        val originalFlags = p.flags
+        p.flags = originalFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        try {
+            wm.updateViewLayout(root, p)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update flags to FLAG_NOT_TOUCHABLE: ${e.message}")
+        }
+
+        // 2. Dispatch gesture after small 35ms delay for WindowManager to update InputDispatcher
+        scope.launch(Dispatchers.Main) {
+            delay(35)
+            action(targetX, targetY)
+
+            // 3. Restore touchable flag after gesture has executed
+            val restoreDelay = if (scrollMode) 320L else 180L
+            delay(restoreDelay)
+            p.flags = originalFlags
+            try {
+                wm.updateViewLayout(root, p)
+            } catch (_: Exception) {}
+        }
+    }
+
     private fun listenToTrackerButtonEvents() {
         val app = IFindApp.instance
         val bleManager = app.bleManager
@@ -588,11 +647,7 @@ class FloatingClickerService : Service() {
         buttonListenerJob = scope.launch {
             bleManager.buttonEvents.collect { event ->
                 val root = floatingRootView ?: return@collect
-                val p = params ?: return@collect
                 val density = resources.displayMetrics.density
-                // Center coordinate: 12dp root padding + 32dp target half-width = 44dp
-                val targetScreenX = p.x + (44 * density)
-                val targetScreenY = p.y + (44 * density)
 
                 try {
                     when (event) {
@@ -613,20 +668,31 @@ class FloatingClickerService : Service() {
                                     }
                                     .start()
 
-                                IFindAccessibilityService.scrollVerticalAt(targetScreenX, targetScreenY, distancePx)
+                                executeWithOverlayBypass(scrollMode = true) { targetX, _ ->
+                                    val dm = resources.displayMetrics
+                                    val startY = dm.heightPixels * 0.72f
+                                    val dispatched = IFindAccessibilityService.scrollVerticalAt(targetX, startY, distancePx)
+                                    Log.d(TAG, "Floater scrollVerticalAt ($targetX, $startY) dispatched: $dispatched")
+                                }
                             } else {
                                 // Single tap
                                 animateClickFeedback(root)
-                                IFindAccessibilityService.clickAt(targetScreenX, targetScreenY)
+                                executeWithOverlayBypass(scrollMode = false) { targetX, targetY ->
+                                    val dispatched = IFindAccessibilityService.clickAt(targetX, targetY)
+                                    Log.d(TAG, "Floater clickAt ($targetX, $targetY) dispatched: $dispatched")
+                                }
                             }
                         }
 
                         is ButtonEvent.DoublePress -> {
                             if (prefs.floaterDoubleTapLike.value) {
-                                Log.i(TAG, "Double press: dispatching Double-Tap Like gesture on screen")
+                                Log.i(TAG, "Double press: executing Double-Tap Like")
                                 vibratePhone()
                                 animateClickFeedback(root)
-                                IFindAccessibilityService.doubleClickAt(targetScreenX, targetScreenY)
+                                executeWithOverlayBypass(scrollMode = false) { targetX, targetY ->
+                                    val dispatched = IFindAccessibilityService.doubleClickAt(targetX, targetY)
+                                    Log.d(TAG, "Floater doubleClickAt ($targetX, $targetY) dispatched: $dispatched")
+                                }
                             }
                         }
 
