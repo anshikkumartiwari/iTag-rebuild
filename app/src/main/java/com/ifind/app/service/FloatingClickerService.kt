@@ -553,9 +553,8 @@ class FloatingClickerService : Service() {
         rootLayout.addView(controlPill)
         rootLayout.addView(settingsPanel)
 
-        // Drag listener on the target reticle
-        targetFrame.setOnTouchListener { _, event ->
-            val p = params ?: return@setOnTouchListener false
+        val dragTouchListener = View.OnTouchListener { _, event ->
+            val p = params ?: return@OnTouchListener false
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = p.x
@@ -575,6 +574,9 @@ class FloatingClickerService : Service() {
             }
         }
 
+        targetFrame.setOnTouchListener(dragTouchListener)
+        coordLabel.setOnTouchListener(dragTouchListener)
+
         floatingRootView = rootLayout
         try {
             windowManager?.addView(rootLayout, params)
@@ -584,21 +586,38 @@ class FloatingClickerService : Service() {
         }
     }
 
+    private var isGestureInProgress = false
+
     private fun executeWithOverlayBypass(
-        scrollMode: Boolean = false,
-        isDoubleTap: Boolean = false,
-        action: (targetX: Float, targetY: Float) -> Unit
+        action: (targetX: Float, targetY: Float, onFinished: () -> Unit) -> Unit
     ) {
+        if (isGestureInProgress) {
+            Log.d(TAG, "Ignoring gesture request: another gesture is already in progress")
+            return
+        }
+
         val root = floatingRootView ?: return
         val wm = windowManager ?: return
         val p = params ?: return
 
+        if (!IFindAccessibilityService.isRunning()) {
+            Toast.makeText(
+                this@FloatingClickerService,
+                "Please enable iFind in Accessibility settings",
+                Toast.LENGTH_SHORT
+            ).show()
+            Log.w(TAG, "Cannot dispatch gesture: IFindAccessibilityService is not connected")
+            return
+        }
+
+        isGestureInProgress = true
+
+        val location = IntArray(2)
+        centerDotView?.getLocationOnScreen(location)
         val density = resources.displayMetrics.density
         val fallbackX = p.x + (44f * density)
         val fallbackY = p.y + (44f * density)
 
-        val location = IntArray(2)
-        centerDotView?.getLocationOnScreen(location)
         val targetX = if (location[0] > 0 && (centerDotView?.width ?: 0) > 0) {
             location[0] + (centerDotView?.width ?: 0) / 2f
         } else {
@@ -610,19 +629,7 @@ class FloatingClickerService : Service() {
             fallbackY
         }
 
-        if (!IFindAccessibilityService.isRunning()) {
-            Toast.makeText(
-                this@FloatingClickerService,
-                "Please turn ON iFind in Accessibility settings",
-                Toast.LENGTH_SHORT
-            ).show()
-            Log.w(TAG, "Cannot dispatch gesture: IFindAccessibilityService is not connected")
-            return
-        }
-
-        // 1. Set FLAG_NOT_TOUCHABLE on the floating window
-        // Crucial: This ensures synthetic accessibility touches pass through directly
-        // to the underlying app without being intercepted by targetFrame!
+        // 1. Temporarily set FLAG_NOT_TOUCHABLE so synthetic touches fall through to target app
         val originalFlags = p.flags
         p.flags = originalFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         try {
@@ -631,19 +638,32 @@ class FloatingClickerService : Service() {
             Log.e(TAG, "Failed to update flags to FLAG_NOT_TOUCHABLE: ${e.message}")
         }
 
-        // 2. Dispatch gesture after small 35ms delay for WindowManager to update InputDispatcher
-        scope.launch(Dispatchers.Main) {
-            delay(35)
-            action(targetX, targetY)
-
-            // 3. Restore touchable flag after gesture has executed
-            val restoreDelay = if (scrollMode) 320L else if (isDoubleTap) 320L else 180L
-            delay(restoreDelay)
+        var isRestored = false
+        fun restoreFlags() {
+            if (isRestored) return
+            isRestored = true
+            isGestureInProgress = false
             p.flags = originalFlags
             try {
                 wm.updateViewLayout(root, p)
             } catch (_: Exception) {}
         }
+
+        // Safety fallback: restore touchability if callback is delayed or lost
+        val safetyRunnable = Runnable {
+            restoreFlags()
+        }
+        root.postDelayed(safetyRunnable, 600L)
+
+        // 2. Dispatch gesture after brief 40ms sync delay for WindowManager/InputDispatcher to apply flag
+        root.postDelayed({
+            action(targetX, targetY) {
+                root.removeCallbacks(safetyRunnable)
+                root.post {
+                    restoreFlags()
+                }
+            }
+        }, 40L)
     }
 
     private fun listenToTrackerButtonEvents() {
@@ -663,30 +683,30 @@ class FloatingClickerService : Service() {
                             vibratePhone()
 
                             if (mode == "scroll") {
-                                // Vertical scroll: swipe up to advance reel
                                 val distanceDp = prefs.floaterScrollDistanceDp.value
                                 val distancePx = distanceDp * density
 
-                                root.animate()
-                                    .translationY(-30f)
-                                    .setDuration(120)
-                                    .withEndAction {
-                                        root.animate().translationY(0f).setDuration(120).start()
-                                    }
-                                    .start()
+                                animateScrollFeedback(root)
 
-                                executeWithOverlayBypass(scrollMode = true) { targetX, _ ->
-                                    val dm = resources.displayMetrics
-                                    val startY = dm.heightPixels * 0.72f
-                                    val dispatched = IFindAccessibilityService.scrollVerticalAt(targetX, startY, distancePx)
-                                    Log.d(TAG, "Floater scrollVerticalAt ($targetX, $startY) dispatched: $dispatched")
+                                executeWithOverlayBypass { targetX, targetY, onFinished ->
+                                    val dispatched = IFindAccessibilityService.scrollVerticalAt(
+                                        startX = targetX,
+                                        startY = targetY,
+                                        distancePx = distancePx,
+                                        onComplete = onFinished
+                                    )
+                                    Log.d(TAG, "Floater scrollVerticalAt ($targetX, $targetY) dist=$distancePx dispatched=$dispatched")
                                 }
                             } else {
-                                // Single tap
                                 animateClickFeedback(root)
-                                executeWithOverlayBypass(scrollMode = false) { targetX, targetY ->
-                                    val dispatched = IFindAccessibilityService.clickAt(targetX, targetY)
-                                    Log.d(TAG, "Floater clickAt ($targetX, $targetY) dispatched: $dispatched")
+
+                                executeWithOverlayBypass { targetX, targetY, onFinished ->
+                                    val dispatched = IFindAccessibilityService.clickAt(
+                                        x = targetX,
+                                        y = targetY,
+                                        onComplete = onFinished
+                                    )
+                                    Log.d(TAG, "Floater clickAt ($targetX, $targetY) dispatched=$dispatched")
                                 }
                             }
                         }
@@ -696,9 +716,14 @@ class FloatingClickerService : Service() {
                                 Log.i(TAG, "Double press: executing Double-Tap Like")
                                 vibratePhone()
                                 animateClickFeedback(root)
-                                executeWithOverlayBypass(scrollMode = false, isDoubleTap = true) { targetX, targetY ->
-                                    val dispatched = IFindAccessibilityService.doubleClickAt(targetX, targetY)
-                                    Log.d(TAG, "Floater doubleClickAt ($targetX, $targetY) dispatched: $dispatched")
+
+                                executeWithOverlayBypass { targetX, targetY, onFinished ->
+                                    val dispatched = IFindAccessibilityService.doubleClickAt(
+                                        x = targetX,
+                                        y = targetY,
+                                        onComplete = onFinished
+                                    )
+                                    Log.d(TAG, "Floater doubleClickAt ($targetX, $targetY) dispatched=$dispatched")
                                 }
                             }
                         }
@@ -710,6 +735,16 @@ class FloatingClickerService : Service() {
                 }
             }
         }
+    }
+
+    private fun animateScrollFeedback(view: View) {
+        view.animate()
+            .translationY(-30f)
+            .setDuration(120)
+            .withEndAction {
+                view.animate().translationY(0f).setDuration(120).start()
+            }
+            .start()
     }
 
     private fun animateClickFeedback(view: View) {
