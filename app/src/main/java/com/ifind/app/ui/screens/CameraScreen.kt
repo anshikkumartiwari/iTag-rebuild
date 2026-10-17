@@ -1,13 +1,21 @@
 package com.ifind.app.ui.screens
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
+import android.util.Size
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -16,9 +24,14 @@ import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +40,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,14 +48,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.rounded.Cameraswitch
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FlashAuto
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.FlashOn
-import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.Flip
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,23 +67,31 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ifind.app.ble.BleManager
@@ -75,9 +101,14 @@ import com.ifind.app.ui.theme.AccentAmber
 import com.ifind.app.ui.theme.AccentCoral
 import com.ifind.app.ui.theme.AccentEmerald
 import com.ifind.app.ui.theme.BrandCyan
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+private const val TAG = "CameraScreen"
 
 @Composable
 fun CameraScreen(
@@ -87,19 +118,81 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
 
     val connectionState by bleManager.connectionState.collectAsState()
     val countdownSetting by preferencesManager.cameraCountdownSeconds.collectAsState()
 
-    var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
-    var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
+    // 1. Open app in selfie (front camera) by default
+    var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_FRONT) }
+    var mirrorSelfie by remember { mutableStateOf(false) } // Default without mirroring as requested
+    var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_OFF) } // Default flash off
     var countdownRemaining by remember { mutableIntStateOf(0) }
     var isCapturing by remember { mutableStateOf(false) }
-    var isFlashEffectActive by remember { mutableStateOf(false) }
+    var isShutterBlinkActive by remember { mutableStateOf(false) }
+
     var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
     var cameraControl: Camera? by remember { mutableStateOf(null) }
+    var cameraProvider: ProcessCameraProvider? by remember { mutableStateOf(null) }
+    var previewView: PreviewView? by remember { mutableStateOf(null) }
+
+    // Tap to Focus and Exposure Slider states
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    var showFocusRing by remember { mutableStateOf(false) }
+    var exposureIndex by remember { mutableIntStateOf(0) }
+    var minExposure by remember { mutableIntStateOf(-4) }
+    var maxExposure by remember { mutableIntStateOf(4) }
+    var focusTimeoutJob by remember { mutableStateOf<Job?>(null) }
+
+    // Last Photo thumbnail state
+    var latestPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var latestPhotoBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var showFullscreenPhoto by remember { mutableStateOf(false) }
 
     val isConnected = connectionState.isConnected
+
+    // Helper to query the most recently saved photo from Gallery/MediaStore
+    fun loadLatestPhoto() {
+        try {
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DATE_ADDED
+            )
+            val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                    val id = cursor.getLong(idColumn)
+                    val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                    val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        try {
+                            context.contentResolver.loadThumbnail(contentUri, Size(120, 120), null)
+                        } catch (_: Exception) { null }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        MediaStore.Images.Thumbnails.getThumbnail(
+                            context.contentResolver, id,
+                            MediaStore.Images.Thumbnails.MINI_KIND, null
+                        )
+                    }
+                    latestPhotoUri = contentUri
+                    latestPhotoBitmap = bitmap
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading thumbnail: ${e.message}")
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadLatestPhoto()
+    }
 
     // Shutter Trigger Execution
     fun takePhoto() {
@@ -115,14 +208,25 @@ fun CameraScreen(
             }
         }
 
+        // Without mirroring in selfie as requested (or follow mirror toggle)
+        val metadata = ImageCapture.Metadata().apply {
+            isReversedHorizontal = mirrorSelfie
+        }
+
         val outputOptions = ImageCapture.OutputFileOptions.Builder(
             context.contentResolver,
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             contentValues
-        ).build()
+        ).setMetadata(metadata).build()
 
         isCapturing = true
-        isFlashEffectActive = true
+
+        // Brief, gentle 70ms shutter dip (NO solid white screen flash when flash is off!)
+        isShutterBlinkActive = true
+        coroutineScope.launch {
+            delay(70)
+            isShutterBlinkActive = false
+        }
 
         capture.takePicture(
             outputOptions,
@@ -130,13 +234,15 @@ fun CameraScreen(
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     isCapturing = false
-                    isFlashEffectActive = false
+                    outputFileResults.savedUri?.let { uri ->
+                        latestPhotoUri = uri
+                    }
+                    loadLatestPhoto()
                     Toast.makeText(context, "Saved selfie to Gallery!", Toast.LENGTH_SHORT).show()
                 }
 
                 override fun onError(exception: ImageCaptureException) {
                     isCapturing = false
-                    isFlashEffectActive = false
                     Toast.makeText(context, "Capture error: ${exception.message}", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -164,7 +270,7 @@ fun CameraScreen(
         }
     }
 
-    // Collect BLE button events as Remote Shutter!
+    // Collect BLE button events as Remote Shutter
     LaunchedEffect(Unit) {
         bleManager.buttonEvents.collect { event ->
             when (event) {
@@ -176,22 +282,23 @@ fun CameraScreen(
         }
     }
 
-    var cameraProvider: ProcessCameraProvider? by remember { mutableStateOf(null) }
-    var previewView: PreviewView? by remember { mutableStateOf(null) }
-
-    // Rebind camera whenever lens facing (front/back) changes
+    // Rebind CameraX preview and capture with exact 16:9 aspect ratio and maximum quality
     LaunchedEffect(lensFacing, cameraProvider, previewView) {
         val provider = cameraProvider ?: return@LaunchedEffect
         val view = previewView ?: return@LaunchedEffect
 
         try {
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(view.surfaceProvider)
-            }
+            // Target 16:9 vertical preview and capture so preview and photo match 1:1
+            val preview = Preview.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_16_9)
+                .build().also {
+                    it.setSurfaceProvider(view.surfaceProvider)
+                }
 
             val capture = ImageCapture.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_16_9)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setFlashMode(flashMode)
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
             imageCapture = capture
 
@@ -200,14 +307,20 @@ fun CameraScreen(
                 .build()
 
             provider.unbindAll()
-            cameraControl = provider.bindToLifecycle(
+            val camera = provider.bindToLifecycle(
                 lifecycleOwner,
                 cameraSelector,
                 preview,
                 capture
             )
+            cameraControl = camera
+
+            val expState = camera.cameraInfo.exposureState
+            minExposure = expState.exposureCompensationRange.lower
+            maxExposure = expState.exposureCompensationRange.upper
+            exposureIndex = expState.exposureCompensationIndex
         } catch (e: Exception) {
-            Toast.makeText(context, "Failed to switch camera: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Failed to initialize camera: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -216,47 +329,150 @@ fun CameraScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Live Camera Preview
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                val view = PreviewView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
+        // 1. Live Camera Preview Viewfinder with tap-to-focus and drag-to-adjust exposure
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(previewView, cameraControl) {
+                    detectTapGestures { offset ->
+                        val pv = previewView ?: return@detectTapGestures
+                        val camera = cameraControl ?: return@detectTapGestures
+
+                        focusPoint = offset
+                        showFocusRing = true
+                        focusTimeoutJob?.cancel()
+                        focusTimeoutJob = coroutineScope.launch {
+                            delay(3500)
+                            showFocusRing = false
+                        }
+
+                        try {
+                            val factory = pv.meteringPointFactory
+                            val point = factory.createPoint(offset.x, offset.y)
+                            val action = FocusMeteringAction.Builder(
+                                point,
+                                FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                            ).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
+                            camera.cameraControl.startFocusAndMetering(action)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Focus error: ${e.message}")
+                        }
+                    }
+                }
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    val view = PreviewView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }
+                    previewView = view
+
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    cameraProviderFuture.addListener({
+                        try {
+                            cameraProvider = cameraProviderFuture.get()
+                        } catch (e: Exception) {
+                            Toast.makeText(ctx, "Camera error: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
+
+                    view
+                },
+                update = {
+                    imageCapture?.flashMode = flashMode
+                }
+            )
+
+            // 2. Google Pixel Style Tap-to-Focus Ring and Exposure Slider
+            if (showFocusRing && focusPoint != null) {
+                val pt = focusPoint!!
+                val ringSize = 64.dp
+
+                // Focus Ring with subtle animation
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset((pt.x - 32.dp.toPx()).toInt(), (pt.y - 32.dp.toPx()).toInt()) }
+                        .size(ringSize)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.9f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(Color.White.copy(alpha = 0.9f), CircleShape)
                     )
                 }
-                previewView = view
 
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                cameraProviderFuture.addListener({
-                    try {
-                        cameraProvider = cameraProviderFuture.get()
-                    } catch (e: Exception) {
-                        Toast.makeText(ctx, "Failed to get camera provider: ${e.message}", Toast.LENGTH_SHORT).show()
+                // Vertical Exposure Slider Track with Sun icon (Slide up to brighten, slide down to darken)
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset((pt.x + 40.dp.toPx()).toInt(), (pt.y - 60.dp.toPx()).toInt()) }
+                        .height(120.dp)
+                        .width(36.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .pointerInput(cameraControl, exposureIndex) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                val camera = cameraControl ?: return@detectDragGestures
+                                val range = (maxExposure - minExposure).coerceAtLeast(1)
+                                val step = (-dragAmount.y / 20f).toInt()
+                                if (step != 0) {
+                                    val newExp = (exposureIndex + step).coerceIn(minExposure, maxExposure)
+                                    if (newExp != exposureIndex) {
+                                        exposureIndex = newExp
+                                        try {
+                                            camera.cameraControl.setExposureCompensationIndex(newExp)
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.WbSunny,
+                            contentDescription = "Exposure",
+                            tint = AccentAmber,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        val expText = if (exposureIndex > 0) "+$exposureIndex" else "$exposureIndex"
+                        Text(
+                            text = expText,
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                }, ContextCompat.getMainExecutor(ctx))
-
-                view
-            },
-            update = {
-                imageCapture?.flashMode = flashMode
+                }
             }
-        )
+        }
 
-        // Shutter Flash visual animation
+        // 3. Shutter Curtain Blink (Brief, clean 70ms black fade; NO solid white screen!)
         AnimatedVisibility(
-            visible = isFlashEffectActive,
+            visible = isShutterBlinkActive,
+            enter = fadeIn(tween(30)),
+            exit = fadeOut(tween(50)),
             modifier = Modifier.fillMaxSize()
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.White)
+                    .background(Color.Black.copy(alpha = 0.65f))
             )
         }
 
-        // Live Countdown Overlay
+        // 4. Live Countdown Overlay
         if (countdownRemaining > 0) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -265,12 +481,12 @@ fun CameraScreen(
                 Surface(
                     shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.6f),
-                    modifier = Modifier.size(140.dp)
+                    modifier = Modifier.size(130.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = "$countdownRemaining",
-                            fontSize = 72.sp,
+                            fontSize = 68.sp,
                             fontWeight = FontWeight.Bold,
                             color = BrandCyan
                         )
@@ -279,11 +495,11 @@ fun CameraScreen(
             }
         }
 
-        // Top Control Bar
+        // 5. Minimal Google Pixel Style Top Control Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 40.dp)
+                .padding(horizontal = 16.dp, vertical = 38.dp)
                 .align(Alignment.TopCenter),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -292,7 +508,7 @@ fun CameraScreen(
                 onClick = onBack,
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.5f))
+                    .background(Color.Black.copy(alpha = 0.45f))
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
@@ -304,25 +520,25 @@ fun CameraScreen(
             // Tracker Status Pill
             Surface(
                 shape = RoundedCornerShape(50),
-                color = Color.Black.copy(alpha = 0.6f),
+                color = Color.Black.copy(alpha = 0.55f),
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
                     if (isConnected) AccentEmerald.copy(alpha = 0.8f) else AccentCoral.copy(alpha = 0.8f)
                 )
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = if (isConnected) Icons.Rounded.BluetoothConnected else Icons.Rounded.BluetoothDisabled,
                         contentDescription = null,
                         tint = if (isConnected) AccentEmerald else AccentCoral,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isConnected) "iTAG SHUTTER ARMED" else "iTAG DISCONNECTED",
+                        text = if (isConnected) "iTAG SHUTTER READY" else "iTAG DISCONNECTED",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -330,85 +546,150 @@ fun CameraScreen(
                 }
             }
 
-            // Flash Toggle
-            IconButton(
-                onClick = {
-                    flashMode = when (flashMode) {
-                        ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
-                        ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_OFF
-                        else -> ImageCapture.FLASH_MODE_AUTO
+            // Controls Group: Mirror, Flash, Timer
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Mirror Selfie Toggle (only on front camera)
+                if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                    IconButton(
+                        onClick = {
+                            mirrorSelfie = !mirrorSelfie
+                            Toast.makeText(
+                                context,
+                                if (mirrorSelfie) "Selfie Mirror: ON" else "Selfie Mirror: OFF (Natural)",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (mirrorSelfie) BrandCyan.copy(alpha = 0.4f) else Color.Black.copy(alpha = 0.45f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Flip,
+                            contentDescription = "Mirror Selfie",
+                            tint = if (mirrorSelfie) BrandCyan else Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-                },
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.5f))
-            ) {
-                Icon(
-                    imageVector = when (flashMode) {
-                        ImageCapture.FLASH_MODE_ON -> Icons.Rounded.FlashOn
-                        ImageCapture.FLASH_MODE_OFF -> Icons.Rounded.FlashOff
-                        else -> Icons.Rounded.FlashAuto
+                }
+
+                // Flash Toggle
+                IconButton(
+                    onClick = {
+                        flashMode = when (flashMode) {
+                            ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
+                            ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
+                            else -> ImageCapture.FLASH_MODE_OFF
+                        }
                     },
-                    contentDescription = "Flash",
-                    tint = if (flashMode != ImageCapture.FLASH_MODE_OFF) AccentAmber else Color.White
-                )
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.45f))
+                ) {
+                    Icon(
+                        imageVector = when (flashMode) {
+                            ImageCapture.FLASH_MODE_ON -> Icons.Rounded.FlashOn
+                            ImageCapture.FLASH_MODE_AUTO -> Icons.Rounded.FlashAuto
+                            else -> Icons.Rounded.FlashOff
+                        },
+                        contentDescription = "Flash",
+                        tint = if (flashMode != ImageCapture.FLASH_MODE_OFF) AccentAmber else Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Countdown Timer Toggle
+                IconButton(
+                    onClick = {
+                        val nextSec = when (countdownSetting) {
+                            0 -> 3
+                            3 -> 5
+                            else -> 0
+                        }
+                        preferencesManager.setCameraCountdown(nextSec)
+                    },
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.45f))
+                ) {
+                    if (countdownSetting > 0) {
+                        Text(
+                            text = "${countdownSetting}s",
+                            color = BrandCyan,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Timer,
+                            contentDescription = "Timer",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
 
-        // Bottom Shutter Dock
+        // 6. Google Pixel Style Bottom Camera Dock
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 40.dp, start = 24.dp, end = 24.dp)
+                .padding(bottom = 36.dp, start = 28.dp, end = 28.dp)
                 .align(Alignment.BottomCenter)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Countdown Setting shortcut
-                Surface(
-                    shape = CircleShape,
-                    color = Color.Black.copy(alpha = 0.5f),
+                // Photo Gallery Thumbnail / Viewer Button
+                Box(
                     modifier = Modifier
-                        .size(50.dp)
+                        .size(54.dp)
                         .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .border(1.5.dp, Color.White.copy(alpha = 0.6f), CircleShape)
                         .clickable {
-                            val nextSec = when (countdownSetting) {
-                                0 -> 3
-                                3 -> 5
-                                else -> 0
+                            if (latestPhotoUri != null) {
+                                showFullscreenPhoto = true
+                            } else {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        type = "image/*"
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "No photos found yet", Toast.LENGTH_SHORT).show()
+                                }
                             }
-                            preferencesManager.setCameraCountdown(nextSec)
-                        }
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (countdownSetting > 0) {
-                            Text(
-                                text = "${countdownSetting}s",
-                                fontWeight = FontWeight.Bold,
-                                color = BrandCyan,
-                                fontSize = 14.sp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Rounded.Timer,
-                                contentDescription = "Timer",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                    if (latestPhotoBitmap != null) {
+                        Image(
+                            bitmap = latestPhotoBitmap!!.asImageBitmap(),
+                            contentDescription = "Latest Photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.PhotoLibrary,
+                            contentDescription = "Gallery",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
                 }
 
-                // Shutter Button
+                // Google Pixel Style Shutter Button
                 Box(
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(82.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.2f))
-                        .padding(6.dp)
+                        .border(3.5.dp, Color.White, CircleShape)
+                        .padding(5.dp)
                         .clip(CircleShape)
                         .background(Color.White)
                         .clickable(enabled = !isCapturing && countdownRemaining == 0) {
@@ -418,22 +699,21 @@ fun CameraScreen(
                 ) {
                     if (isCapturing) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(36.dp),
+                            modifier = Modifier.size(32.dp),
                             color = Color.Black,
                             strokeWidth = 3.dp
                         )
                     } else {
                         Box(
                             modifier = Modifier
-                                .size(60.dp)
+                                .size(64.dp)
                                 .clip(CircleShape)
                                 .background(Color.White)
-                                .border(2.dp, Color.Black, CircleShape)
                         )
                     }
                 }
 
-                // Camera Switch (Front/Back)
+                // Lens Switcher (Front ↔ Rear)
                 IconButton(
                     onClick = {
                         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
@@ -443,16 +723,78 @@ fun CameraScreen(
                         }
                     },
                     modifier = Modifier
-                        .size(50.dp)
+                        .size(54.dp)
                         .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.5f))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .border(1.5.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Cameraswitch,
-                        contentDescription = "Switch Camera",
+                        contentDescription = "Flip Camera",
                         tint = Color.White,
                         modifier = Modifier.size(26.dp)
                     )
+                }
+            }
+        }
+
+        // Fullscreen In-App Photo Inspector Dialog
+        if (showFullscreenPhoto && latestPhotoUri != null) {
+            Dialog(
+                onDismissRequest = { showFullscreenPhoto = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                ) {
+                    if (latestPhotoBitmap != null) {
+                        Image(
+                            bitmap = latestPhotoBitmap!!.asImageBitmap(),
+                            contentDescription = "Fullscreen Photo",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    // Top Bar for Photo Viewer
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
+                            .align(Alignment.TopCenter),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { showFullscreenPhoto = false },
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.6f))
+                        ) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Close", tint = Color.White)
+                        }
+
+                        IconButton(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(latestPhotoUri, "image/*")
+                                        flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Open with"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not open gallery: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.6f))
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open in Gallery", tint = Color.White)
+                        }
+                    }
                 }
             }
         }
