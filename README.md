@@ -7,7 +7,7 @@
 iFind is a native Android application built in Kotlin and Jetpack Compose. It replaces the original *iSearching* tracker companion app with modern BLE GATT lifecycle handling, a responsive 3-tab consumer design, and an integrated CameraX remote selfie shutter triggered by the tracker's physical button.
 
 ### 📥 Direct Downloads & Webpage
-- **Web Landing Page**: [View `index.html`](index.html)
+- **Web Landing Page**: [ansk.in/iTag-rebuild/](https://ansk.in/iTag-rebuild/)
 - **Direct APK**: [Download `iFind-v1.1.0.apk` (20.4 MB)](release/iFind-v1.1.0.apk)
 - **Complete ZIP Bundle**: [Download `iFind-v1.1.0.zip` (19.4 MB)](release/iFind-v1.1.0.zip) *(includes APK, Setup Guide, & Checksums)*
 - **Installation Guide**: [Step-by-Step Android Sideload Guide](release/INSTALLATION_GUIDE.md)
